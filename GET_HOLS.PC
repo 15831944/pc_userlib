@@ -1,0 +1,93 @@
+#include <stdio.h>
+#include <malloc.h>
+#include <string.h>
+#include <process.h>
+#include "floatrepo.h"
+#include "get_hols.h"
+#include "userinfo.h"
+
+#define HOLNULL  (itpntr)NULL
+
+EXEC SQL INCLUDE SQLCA;
+
+void get_holidays(const char *currency)
+{
+	int	i;
+
+	EXEC SQL BEGIN DECLARE SECTION;
+		VARCHAR	statement[300];
+		VARCHAR	hol[11];
+		VARCHAR	currencyt[4];
+		short ind;
+	EXEC SQL END DECLARE SECTION;
+
+	EXEC SQL WHENEVER SQLERROR GOTO label1;
+
+	if(strcmp(currency,"ALL")==0)
+		SaveCopy(statement.arr, sizeof(statement.arr), "SELECT CURRENCY, TO_CHAR(HOLIDAY,'DD MM YYYY') "
+				"FROM SEMAM.NW_HOLIDAYS", 0);
+	else 
+	{
+		SaveCopy(currencyt.arr, sizeof(currencyt.arr), currency, 0);
+		currencyt.len = strlen(currencyt.arr);
+
+		SaveCopy(statement.arr, sizeof(statement.arr), "SELECT CURRENCY, TO_CHAR(HOLIDAY,'DD MM YYYY') ", 0);
+		SaveConcatenate(statement.arr, sizeof(statement.arr), "FROM SEMAM.NW_HOLIDAYS WHERE CURRENCY = :c1 ");
+	}
+	statement.len = strlen(statement.arr);
+
+	EXEC SQL PREPARE S1 FROM :statement;
+	EXEC SQL DECLARE HOL1 CURSOR FOR S1;
+
+	if(strcmp(currency,"ALL")==0)
+		EXEC SQL OPEN HOL1;
+	else 
+		EXEC SQL OPEN HOL1 USING :currencyt;
+	
+	i=1;
+	if((holidays=(itpntr)calloc(i,sizeof(it)))== HOLNULL)
+	{
+		printf("\nError allocating Heap memory in Holidays module.");
+		exit(0);
+	}
+
+	for(;;)
+	{
+		EXEC SQL FETCH HOL1 INTO :currencyt:ind, :hol:ind;
+		hol.arr[hol.len]= 0;
+		currencyt.arr[currencyt.len]= 0;
+
+		if(sqlca.sqlcode == 1403)
+			break;
+
+		SaveCopy(holidays[i-1].h, sizeof(holidays[i-1].h), hol.arr, 0);
+		holidays[i-1].c = currencyt.arr[0];
+		i++;	
+			
+		if((holidays=(itpntr)realloc(holidays,i*sizeof(it)))== HOLNULL)
+	    {
+	       printf("\nRealloc can't allocate Heap memory in Holidays module.");
+	       exit(0);
+	    }
+	}
+
+	SaveCopy(holidays[i-1].h, sizeof(holidays[i-1].h), "END", 0);
+	EXEC SQL CLOSE HOL1;
+	return;
+
+label1:
+	SqlError("get_holidays", 1);
+}
+/***************************************************************
+The Following functions provided for compatibility with previous
+versions of get_hols.pc
+****************************************************************/
+void get_USA_holidays()
+{
+	get_holidays("USD");
+}
+
+void get_LONDON_holidays()
+{
+	get_holidays("GBR");
+}

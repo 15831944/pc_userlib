@@ -1,0 +1,104 @@
+#include <stdio.h>
+#include <string.h>
+#include <conio.h>
+#include <stdlib.h>
+#include <process.h>
+#include <ctype.h>
+#include "gen_fun.h"
+#include "login.h"
+#include "userinfo.h"
+
+char sLoginCommand[100];
+
+EXEC SQL INCLUDE SQLCA.H;
+
+int login(const char *db)
+{
+	int n=0;
+	int ok;
+	char user[40], password[80];
+
+	do
+	{
+		n ++;
+		fprintf(stderr,"USERNAME: ");
+		getString(user, DISPLAY);
+		fprintf(stderr,"\nPASSWORD: ");
+		getString(password, NOECHO);
+		ok = logon(user, password, db);
+		if(!ok)
+		{
+			fprintf(stderr,"%.70s (%d)\n", sqlca.sqlerrm.sqlerrmc, -sqlca.sqlcode);
+			fprintf(stderr,"\nInvalid username/password. Please Enter again .\n\n\n");
+		}
+	} while(n <= 3 && !ok);
+
+	if(!ok)
+		fprintf(stderr, "Wrong again. I am loging you out!\n");
+	else
+		fprintf(stderr,"Connected to ORACLE via user %s\n\n",user); 
+
+	return ok;
+}
+
+int logon(const char *user, const char *password, const char *db)
+{
+	EXEC SQL BEGIN DECLARE SECTION;
+		VARCHAR LoginCommand[80];
+	EXEC SQL END DECLARE SECTION;
+
+	if(!db || strlen(db) == 0)
+		sprintf_s(LoginCommand.arr, sizeof(LoginCommand.arr), "%s/%s@NWIDB", user, password);
+	else
+		sprintf_s(LoginCommand.arr, sizeof(LoginCommand.arr), "%s/%s@%s", user, password, db);
+	LoginCommand.len = strlen(LoginCommand.arr);
+
+	EXEC SQL WHENEVER SQLERROR GOTO Error;
+	EXEC SQL CONNECT :LoginCommand;
+	SaveCopy(sLoginCommand, sizeof(sLoginCommand), LoginCommand.arr, 0);
+	return 1;
+
+Error:
+	return 0;
+}
+/***************************************************************************
+*  FUNCION NAME: GetString(inStr,mode)                                     *
+*    This function gets a string for the keyboard and converts it to upper *
+*  case.  Then it can or cannot echo it to the screen depending on the     *
+*  mode.                                                                   *
+*                                                                          *
+*  PARAMETERS:                                                             *
+*    inStr - A character pointer to an array buffer.                       *
+*    mode  - NOECHO(0) or DISPLAY(1)                                       *
+*                                                                          *
+*                                                                          *
+****************************************************************************/
+void getString(char *inStr, int mode)
+{
+	char inChar;
+	int index=0;
+
+	do
+	{
+    	inChar = _getch();
+		inChar = toupper(inChar);
+
+		if ((inChar == 13) || (mode == DISPLAY)) 
+			fputc(inChar,stderr);
+	  
+		switch (inChar)
+		{
+			case 13:
+			case 10:
+				inStr[index] = '\0';
+				break;
+			case 8:
+				index--;
+				break;
+			default:
+				inStr[index] = inChar;
+				index++;
+		}                    
+	} 
+	while ((inChar != 13) && (inChar != 10));
+}

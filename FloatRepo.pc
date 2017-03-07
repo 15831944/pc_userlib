@@ -1,0 +1,1506 @@
+/*******************************************************
+  Standard Accrual For Floating Repo
+LX 17-OCT-01  Window NT
+*******************************************************/
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+#include <process.h>
+#include "gen_fun.h"
+#include "asset.h"
+#include "floatrepo.h"
+#include "userinfo.h"
+
+
+typedef struct
+{
+   double amt;
+   double interest;
+   int days;
+   double rate;
+} DailyFloatType;
+
+EXEC SQL BEGIN DECLARE SECTION;
+VARCHAR FloatRepoSql[5000],
+		FloatRepoRateBasis[10],
+		FloatRepoFrom[12],
+		FloatRepoTo[12],
+		FloatRepoPortfolio[11],
+		FloatRepoFormula[21],
+		FloatAsset[11],
+		FloatXType[11],
+		FloatCurrency[4],
+		FloatCustodian[36],
+		FloatEuroClear[6],
+		FloatAccount[11],
+		FloatAccount2[51],
+		FloatAccountID[21],
+		FloatBank[31],
+		FloatCustodianAccount[21],
+		FloatCustodianCode[21],
+		FloatMargin[2],
+		FloatContact[31],
+		FloatFax[16],
+		FloatPhone[31];
+
+long FloatRepoTransNum, FloatRepoInvNum;
+double FloatRepoRate, FloatRepoXFxrate;
+int AARYearBase;
+short NULLIndicator;
+EXEC SQL END DECLARE SECTION;
+
+
+EXEC SQL INCLUDE SQLCA;
+EXEC SQL INCLUDE oraca;
+EXEC ORACLE OPTION (ORACA=YES);
+
+/********************
+FUNCTION DECLARATIONS
+*********************/
+void SetDateFormat()
+{
+	EXEC SQL WHENEVER SQLERROR GOTO Liblabel;
+	EXEC SQL ALTER SESSION SET NLS_DATE_FORMAT = 'DD-MON-RR';
+	return;
+
+Liblabel:
+	SqlError("SetDateForamt", 1);
+}
+/************************************************
+************************************************/
+void SetCFDate()
+{
+	EXEC SQL BEGIN DECLARE SECTION;
+		VARCHAR Lib_cf_date[11];
+	EXEC SQL END DECLARE SECTION;
+	
+	SetDateFormat();
+
+	Lib_cf_date.len = 0;
+	EXEC SQL SELECT DISTINCT INDATE INTO :Lib_cf_date:NULLIndicator FROM SEMAM.NW_CF_POSITION;
+	Lib_cf_date.arr[Lib_cf_date.len] = 0;
+	if(strlen(Lib_cf_date.arr) == 0)
+		SaveCopy(cf_date, sizeof(cf_date), "30-SEP-93", 0);
+	else
+		SaveCopy(cf_date, sizeof(cf_date), Lib_cf_date.arr, 0);
+	return;
+
+Liblabel:
+	SqlError("set_cf_date", 1);
+}
+/************************************************
+************************************************/
+void set_cf_date()
+{
+	EXEC SQL BEGIN DECLARE SECTION;
+		VARCHAR Lib_cf_date[11];
+	EXEC SQL END DECLARE SECTION;
+
+	SetDateFormat();
+
+	Lib_cf_date.len = 0;
+	EXEC SQL SELECT DISTINCT INDATE INTO :Lib_cf_date:NULLIndicator FROM SEMAM.NW_CF_POSITION;
+	Lib_cf_date.arr[Lib_cf_date.len] = 0;
+	if(strlen(Lib_cf_date.arr) == 0)
+		SaveCopy(cf_date, sizeof(cf_date), "30-SEP-93", 0);
+	else
+		SaveCopy(cf_date, sizeof(cf_date), Lib_cf_date.arr, 0);
+	return;
+
+Liblabel:
+	SqlError("set_cf_date", 1);
+}
+/************************************************
+************************************************/
+int CompareCFDate(char *date, int status)
+{
+	int day1, month1, year1;
+	int day2, month2, year2, result;
+
+	get_day_month_year(cf_date, &day1, &month1, &year1);
+    get_day_month_year(date, &day2, &month2, &year2);
+
+	result = -1;
+	if(year1 > year2)
+		result = 1;
+	else
+		if(year1 == year2)
+		{
+			if(month1 > month2)
+				result = 1;
+			else
+				if(month1 == month2)
+					if(day1 > day2)
+						result = 1;
+					else
+						if(day1 == day2)
+							result = 0;
+		}
+
+	switch(status)
+	{
+		case 1:
+			return 1;		
+		case 0:
+			if(result > status)
+			{
+				printf("Report date must be greater than equal to %s\n", cf_date);
+				return 0;
+			}
+			return 1;
+		case -1:
+			if(result > status)
+			{
+				printf("Report date must be greater %s\n", cf_date);
+				return 0;
+			}
+			return 1;
+		default:
+			return 0;
+	}
+}
+/************************************************
+************************************************/
+int compare_date(char* date1, char* date2)
+{
+	int day1, month1, year1;
+	int day2, month2, year2;
+
+	get_day_month_year(date1, &day1, &month1, &year1);
+    get_day_month_year(date2, &day2, &month2, &year2);
+
+	if(year1 > year2)
+		return 1;
+	else
+		if(year1 == year2)
+		{
+			if(month1 > month2)
+				return 1;
+			else
+				if(month1 == month2)
+					if(day1 > day2)
+						return 1;
+					else
+						if(day1 == day2)
+							return 0;
+		}
+
+	return -1;
+}
+/************************************************
+************************************************/
+void get_day_month_year(char* date, int* day, int* month, int* year)
+{
+	char buf[100];
+	char* p, *q = NULL;
+	char* Months[] = {"", "JAN", "FEB", "MAR", "APR", "MAY", "JUN", 
+					"JUL", "AUG", "SEP", "OCT", "NOV", "DEC"};
+	int i = 0, j;
+   
+	SaveCopy(buf, sizeof(buf), date, 0);
+	p = strtok_s(buf, "-", &q);
+	while(p)
+	{
+		switch(i)
+		{
+			case 0:
+				*day = atoi(p);
+				break;
+			case 1:
+				*month = 0;
+				for(j = 0; j < 13 && !*month; j++)
+				{
+					if(strcmp(p, Months[j]) == 0)
+						*month = j;
+				}
+				break;
+			case 2:
+				*year = atoi(p);
+				if(*year < 50)
+					*year += 2000;
+				else
+					*year += 1900;
+				break;
+		}
+      
+		i++;
+		p = strtok_s(NULL, "-", &q);
+	}
+}
+/************************************************
+************************************************/
+int ComputeDailyFloat(DailyFloatType *LevData, const char *AssetCode, double rate, const char *from, 
+					const char *to, const char *enddate, const char *ratebasis, const char *formula)
+{
+	double tmp_int;
+	int days;
+
+	days = ComputeInterest(LevData->amt, rate, from, to, enddate, ratebasis, 1, &tmp_int);
+	LevData->days += days;
+	LevData->rate += rate*days;
+	LevData->interest += tmp_int;
+	if(strstr(formula, "DAILY FLOAT A"))
+		LevData->amt += tmp_int;
+	return days;
+}
+/************************************************
+************************************************/
+/************************************************
+************************************************/
+int ComputeInterest(double amt, double rate, const char *fromdate, const char *todate, 
+					const char *enddate, const char *ratebasis, int AADays, double *interest)
+// return number of days
+{
+	DateType FmsDate;
+	int days;
+
+	FmsDateSetup(&FmsDate, fromdate, enddate, ratebasis, AADays);
+
+	days = FmsDateGetDays(&FmsDate, todate);
+
+	if(strcmp(ratebasis, "A/A (AS)") == 0)
+		*interest = round(amt/1000*round(1000*rate/100*days/FmsDateGetYearBase(&FmsDate), 2), 2);
+	else
+		if(strcmp(ratebasis, "A/365I") == 0)
+		{
+			double d, x, y;
+			d = days;
+			x = round(100*(pow(1 + rate/100, d/365) - 1), 5);
+			y = round(x*d/365, 5);
+			*interest = amt/100*y;
+		}
+		else
+			if(strcmp(ratebasis, "A/A (R)") == 0)
+				*interest = round(amt*rate*days/100/FmsDateGetYearBase(&FmsDate), 2);
+			else
+				if(strcmp(ratebasis, "AB/252") == 0)
+					*interest = round(amt*(pow(1.0 + rate/100, ((double) days)/FmsDateGetYearBase(&FmsDate)) - 1), 2);
+				else
+				{
+					*interest = amt*rate/100*days/FmsDateGetYearBase(&FmsDate);
+					if(strcmp(ratebasis, "A/A (I)") == 0 && FmsDate.m_nYearBase2 > 0)
+					{
+						*interest += amt*rate/100*FmsDate.m_nIntDays2/FmsDate.m_nYearBase2;
+						days += FmsDate.m_nIntDays2;
+					}
+	
+					*interest = round(*interest, 2);
+				}
+
+	return days;
+}
+/************************************************
+************************************************/
+int ComputeInterest2(const char *AssetCode, double amt, double rate, const char *fromdate, 
+					const char *todate, const char *enddate, const char *ratebasis, int AADays, double *interest)
+// return number of days
+{
+	DateType FmsDate;
+	int days;
+
+	FmsDateSetup(&FmsDate, fromdate, enddate, ratebasis, AADays);
+	days = FmsDateGetDays(&FmsDate, todate);
+
+	if(strcmp(ratebasis, "A/A (AS)") == 0)
+	{
+		FmsDate.m_nYearBase = GetDaysInYear(FmsDate.m_EndDate);
+		*interest = round(amt/1000*round(1000*rate/100*days/FmsDateGetYearBase(&FmsDate), 2), 2);
+//		*interest = round(amt/1000*round(1000*rate/100*days/FmsDateGetYearBase(&FmsDate), 2), 2);
+	}
+	else
+		if(strcmp(ratebasis, "A/365I") == 0)
+		{
+			double d, x, y;
+			d = days;
+			x = round(100*(pow(1 + rate/100, d/365) - 1), 5);
+			y = round(x*d/365, 5);
+			*interest = amt/100*y;
+		}
+		else
+			if(strcmp(ratebasis, "A/A (R)") == 0)
+			{
+//				FmsDate.m_nYearBase = GetAARYearBase(AssetCode, FmsDate.m_Date, FmsDate.m_nYear);
+				FmsDate.m_nYearBase = GetDaysInYear(FmsDate.m_EndDate);
+				*interest = round(amt*rate/100/days/FmsDateGetYearBase(&FmsDate), 2);
+			}
+			else
+				if(strcmp(ratebasis, "A/A (A)") == 0)
+				{
+					FmsDate.m_nYearBase = GetAAAYearBase(FmsDate.m_Date);
+					*interest = round(amt*rate/100*days/FmsDateGetYearBase(&FmsDate), 2);
+				}
+				else
+					if(strcmp(ratebasis, "AB/252") == 0)
+						*interest = round(amt*(pow(1.0 + rate/100, ((double) days)/FmsDateGetYearBase(&FmsDate)) - 1), 2);
+					else
+					{
+						*interest = amt*rate/100*days/FmsDateGetYearBase(&FmsDate);
+						if(strcmp(ratebasis, "A/A (I)") == 0 && FmsDate.m_nYearBase2 > 0)
+						{
+							*interest += amt*rate/100*FmsDate.m_nIntDays2/FmsDate.m_nYearBase2;
+							days += FmsDate.m_nIntDays2;
+						}
+
+						*interest = round(*interest, 2);
+					}
+
+	return days;
+}
+/************************************************
+************************************************/
+int FloatRepoAccrual(double repo_amt, const char *portfolio, long trans_num, long inv_num, 
+					const char *from_date, const char *to_date, double *interest, double *rate)
+{
+	DailyFloatType LevData;		
+
+	EXEC SQL WHENEVER SQLERROR GOTO label1;
+
+	SaveCopy(FloatRepoFrom.arr, sizeof(FloatRepoFrom.arr), from_date, 0);
+	FloatRepoFrom.len = strlen(FloatRepoFrom.arr);
+	SaveCopy(FloatRepoTo.arr, sizeof(FloatRepoTo.arr), to_date, 0);
+	FloatRepoTo.len = strlen(FloatRepoTo.arr);
+	SaveCopy(FloatRepoPortfolio.arr, sizeof(FloatRepoPortfolio.arr), portfolio, 0);
+	FloatRepoPortfolio.len = strlen(FloatRepoPortfolio.arr);
+	FloatRepoTransNum = trans_num;
+	FloatRepoInvNum = inv_num;
+	SaveCopy(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "SELECT ASSET_CODE, "
+		"TO_CHAR(GREATEST(INT_FROM, TO_DATE(:d1)), 'DD-MON-YYYY'), "
+		"TO_CHAR(LEAST(NVL(INT_TO, NVL(ACTUAL_VDATE, NVL(A.MATURITY_DATE, TO_DATE(:d2) + 1))), TO_DATE(:d3) + 1), 'DD-MON-YYYY'), "
+		"B.RATE, NVL(RATE_BASIS, 'A/360'), FLOAT_RATE_FORMULA, ASS_TO ", 0);
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "FROM SEMAM.ALL_TICKET_INV_V A, "
+		"SEMAM.NW_REPO_RATES B, SEMAM.NW_ASS_PERIODS C "
+		"WHERE B.TRANS_NUM = A.TRANS_NUM "
+		"AND C.ASS_CODE(+) = A.ASSET_CODE "
+		"AND C.ASS_FROM(+) <= A.VALUE_DATE "
+		"AND C.ASS_TO(+) > A.VALUE_DATE "
+		"AND A.TRANS_NUM = :d4 "
+		"AND A.INV_NUM = :d5 "
+		"AND A.PORTFOLIO = :d6 "
+		"AND GREATEST(INT_FROM, TO_DATE(:d7)) >= :d8 "
+		"AND INT_FROM <= :d9 "
+		"AND A.TR_DESC = 'MATURITY' ");
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "ORDER BY 1 ");
+	FloatRepoSql.len = strlen(FloatRepoSql.arr);
+
+	EXEC SQL PREPARE Srepo FROM :FloatRepoSql;
+	EXEC SQL DECLARE Crepo CURSOR FOR Srepo;
+	EXEC SQL OPEN Crepo USING :FloatRepoFrom:NULLIndicator, :FloatRepoTo:NULLIndicator, 
+					:FloatRepoTo:NULLIndicator, :FloatRepoTransNum:NULLIndicator, 
+					:FloatRepoInvNum:NULLIndicator, :FloatRepoPortfolio:NULLIndicator, 
+					:FloatRepoFrom:NULLIndicator, :FloatRepoFrom:NULLIndicator, 
+					:FloatRepoTo:NULLIndicator;
+
+	LevData.amt = repo_amt;
+	LevData.days = 0;
+	LevData.rate = 0;
+	LevData.interest = 0;
+
+	for(;;)
+	{
+		FloatRepoRate = 0;
+		EXEC SQL FETCH Crepo INTO :FloatAsset:NULLIndicator, :FloatRepoFrom:NULLIndicator, 
+					:FloatRepoTo:NULLIndicator, :FloatRepoRate:NULLIndicator, 
+					:FloatRepoRateBasis:NULLIndicator, :FloatRepoFormula:NULLIndicator,
+					:FloatFax:NULLIndicator; 
+		FloatAsset.arr[FloatAsset.len] = 0;
+		FloatRepoFrom.arr[FloatRepoFrom.len] = 0;
+		FloatRepoTo.arr[FloatRepoTo.len] = 0;
+		FloatRepoRateBasis.arr[FloatRepoRateBasis.len] = 0;
+		FloatRepoFormula.arr[FloatRepoFormula.len] = 0;
+		FloatFax.arr[FloatFax.len] = 0;
+
+		if(sqlca.sqlcode == 1403)
+			break;
+
+		ComputeDailyFloat(&LevData, FloatAsset.arr, FloatRepoRate, FloatRepoFrom.arr, 
+						FloatRepoTo.arr, FloatFax.arr, FloatRepoRateBasis.arr, FloatRepoFormula.arr);
+	}
+
+	EXEC SQL CLOSE Crepo;
+	if(LevData.days > 0)
+		LevData.rate /= LevData.days;
+	
+	*interest = LevData.interest;
+	*rate = LevData.rate;
+
+	return LevData.days;
+
+label1:
+	SqlError("FloatRepoAccrual", 1);
+	return 0;
+}
+/************************************************
+************************************************/
+int FloatRepoInterest(double repo_amt, const char *portfolio, long trans_num, long inv_num, 
+					double *interest, double *rate)
+{
+	DailyFloatType LevData;
+
+	EXEC SQL WHENEVER SQLERROR GOTO label1;
+
+	FloatRepoTransNum = trans_num;
+	FloatRepoInvNum = inv_num;
+	SaveCopy(FloatRepoPortfolio.arr, sizeof(FloatRepoPortfolio.arr), portfolio, 0);
+	FloatRepoPortfolio.len = strlen(FloatRepoPortfolio.arr);
+	SaveCopy(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "SELECT A.ASSET_CODE, "
+		"TO_CHAR(INT_FROM, 'DD-MON-YYYY'), "
+		"TO_CHAR(LEAST(NVL(INT_TO, NVL(ACTUAL_VDATE, A.MATURITY_DATE)), NVL(ACTUAL_VDATE, MATURITY_DATE)), 'DD-MON-YYYY'), "
+		"B.RATE, NVL(RATE_BASIS, 'A/360'), FLOAT_RATE_FORMULA, ASS_TO ", 0);
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "FROM SEMAM.ALL_TICKET_INV_V A, "
+		"SEMAM.NW_REPO_RATES B, SEMAM.NW_ASS_PERIODS C "
+		"WHERE B.TRANS_NUM = A.TRANS_NUM "
+		"AND C.ASS_CODE(+) = A.ASSET_CODE "
+		"AND C.ASS_FROM(+) <= A.VALUE_DATE "
+		"AND C.ASS_TO(+) > A.VALUE_DATE "
+		"AND A.TRANS_NUM = :d1 "
+		"AND A.INV_NUM = :d2 "
+		"AND A.PORTFOLIO = :d3 "
+		"AND A.TR_DESC = 'MATURITY' ");
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "ORDER BY 1 ");
+	FloatRepoSql.len = strlen(FloatRepoSql.arr);
+
+	EXEC SQL PREPARE Srepoint FROM :FloatRepoSql;
+	EXEC SQL DECLARE Crepoint CURSOR FOR Srepoint;
+	EXEC SQL OPEN Crepoint USING :FloatRepoTransNum, :FloatRepoInvNum, :FloatRepoPortfolio;
+
+	LevData.amt = repo_amt;
+	LevData.days = 0;
+	LevData.rate = 0;
+	LevData.interest = 0;
+
+	for(;;)
+	{
+		FloatRepoRate = 0;
+		EXEC SQL FETCH Crepoint INTO :FloatAsset:NULLIndicator, :FloatRepoFrom:NULLIndicator, 
+									:FloatRepoTo:NULLIndicator, :FloatRepoRate:NULLIndicator, 
+									:FloatRepoRateBasis:NULLIndicator, :FloatRepoFormula:NULLIndicator,
+									:FloatFax:NULLIndicator; 
+		FloatAsset.arr[FloatAsset.len] = 0;
+		FloatRepoFrom.arr[FloatRepoFrom.len] = 0;
+		FloatRepoTo.arr[FloatRepoTo.len] = 0;
+		FloatRepoRateBasis.arr[FloatRepoRateBasis.len] = 0;
+		FloatRepoFormula.arr[FloatRepoFormula.len] = 0;
+		FloatFax.arr[FloatFax.len] = 0;
+
+		if(sqlca.sqlcode == 1403)
+			break;
+
+		ComputeDailyFloat(&LevData, FloatAsset.arr, FloatRepoRate, FloatRepoFrom.arr, 
+						FloatRepoTo.arr, FloatFax.arr, FloatRepoRateBasis.arr, FloatRepoFormula.arr);
+	}
+
+	EXEC SQL CLOSE Crepoint;
+	if(LevData.days > 0)
+		LevData.rate /= LevData.days;
+	
+	*interest = LevData.interest;
+	*rate = LevData.rate;
+
+	return LevData.days;
+
+label1:
+	SqlError("FloatRepoInterest", 1);
+	return 0;
+}
+/************************************************
+************************************************/
+void SqlError(const char *Function, int bExit)
+{
+	EXEC SQL WHENEVER SQLERROR CONTINUE;
+
+	printf("\nORACLE error detected in %s()\n", Function);
+	printf("\n%d %s\n", sqlca.sqlerrm.sqlerrml, sqlca.sqlerrm.sqlerrmc);
+	if(bExit)
+	{
+		EXEC SQL ROLLBACK RELEASE;
+		exit(1);
+	}
+}
+/************************************************
+************************************************/
+int GetAB_252Days(const char *FromDate, const char *ToDate)
+{
+	int Days;
+
+	if(strcmp(FromDate, ToDate) == 0)
+		return 0;
+
+	if(strlen(FromDate) > 9)
+		sprintf_s(FloatRepoFrom.arr, sizeof(FloatRepoFrom.arr), "%7.7s%2.2s", FromDate, FromDate + 9);
+	else
+		SaveCopy(FloatRepoFrom.arr, sizeof(FloatRepoFrom.arr), FromDate, 0);
+	FloatRepoFrom.len = strlen(FloatRepoFrom.arr);
+	if(strlen(ToDate) > 9)
+		sprintf_s(FloatRepoTo.arr, sizeof(FloatRepoTo.arr), "%7.7s%2.2s", ToDate, ToDate + 9);
+	else
+		SaveCopy(FloatRepoTo.arr, sizeof(FloatRepoTo.arr), ToDate, 0);
+	FloatRepoTo.len = strlen(FloatRepoTo.arr);
+
+	EXEC SQL WHENEVER SQLERROR GOTO label1;
+	EXEC SQL SELECT SUM(DECODE(TO_CHAR(TO_DATE(:FloatRepoFrom) + INC, 'D'), '1', 0, '7', 0, 1)) 
+				INTO :FloatRepoTransNum:NULLIndicator 
+				FROM SEMAM.MYSEQ
+				WHERE TO_DATE(:FloatRepoFrom) + INC <= TO_DATE(:FloatRepoTo)
+				AND INC > 0 ORDER BY INC;
+
+	Days = FloatRepoTransNum;
+
+	FloatRepoTransNum = 0;
+	EXEC SQL SELECT COUNT(*) INTO :FloatRepoTransNum:NULLIndicator 
+				FROM SEMAM.NW_HOLIDAYS 
+				WHERE HOLIDAY BETWEEN TO_DATE(:FloatRepoFrom) 
+				AND TO_DATE(:FloatRepoTo) AND CURRENCY = 'BRL';
+
+	Days -= FloatRepoTransNum;
+
+	if(Days < 0)
+		Days = 0;
+
+	return Days;
+
+label1:
+	SqlError("GetAB_252Days", 1);
+	return 0;
+}
+/************************************************
+************************************************/
+int GetAAAYearBase(const char *FromDate)
+{
+	char sDate[10];
+
+	if(!FromDate || strlen(FromDate) == 0)
+		return 0;
+
+	if(strstr(FromDate, "29-FEB"))
+		sprintf_s(sDate, sizeof(sDate), "28-FEB-%02d", atoi(FromDate + 7) + 1);
+	else
+		sprintf_s(sDate, sizeof(sDate), "%7.7s%02d", FromDate, atoi(FromDate + 7) + 1);
+
+	sprintf_s(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), 
+			"SELECT TO_DATE('%s') - TO_DATE('%s') FROM DUAL ", sDate, FromDate);
+	FloatRepoSql.len = strlen(FloatRepoSql.arr);
+
+	EXEC SQL PREPARE SAAAYearbase FROM :FloatRepoSql;
+	EXEC SQL DECLARE CAAAYearbase CURSOR FOR SAAAYearbase;
+	EXEC SQL OPEN CAAAYearBase;
+
+	AARYearBase = 0;
+	for(;;)
+	{
+		EXEC SQL FETCH CAAAYearbase INTO :AARYearBase:NULLIndicator;
+		if(sqlca.sqlcode == 1403)
+			break;
+	}
+
+	EXEC SQL CLOSE CAAAYearBase;
+
+	return AARYearBase;
+
+label1:
+	SqlError("GetAAAYearBase2", 1);
+	return 0;
+}
+/************************************************
+************************************************/
+int GetDaysInYear(const char *EndDate)
+{
+	if(!EndDate || strlen(EndDate) != 9)
+		return 365;
+
+	SaveCopy(FloatRepoTo.arr, sizeof(FloatRepoTo.arr), EndDate, 0);
+	FloatRepoTo.len = strlen(FloatRepoTo.arr);
+
+	EXEC SQL SELECT TO_DATE(:FloatRepoTo) - ADD_MONTHS(TO_DATE(:FloatRepoTo), -12) INTO :AARYearBase FROM DUAL;
+
+	return AARYearBase;
+
+label1:
+	SqlError("GetDaysInYear", 1);
+	return 0;
+}
+/************************************************
+************************************************/
+int GetAARYearBase(const char *AssetCode, const char *FromDate, int Year)
+{
+	EXEC SQL WHENEVER SQLERROR GOTO label1;
+	sprintf_s(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "SELECT "
+			"DECODE(ASS_PAYMENT_FREQUENCY, 1, ASS_TO - ASS_FROM, "
+			"TO_DATE('%7.7s%02d') - TO_DATE('%s')) "
+			"FROM SEMAM.NW_ASSETS A "
+			"JOIN SEMAM.NW_ASS_PERIODS B ON (A.ASS_CODE =  B.ASS_CODE) "
+			"WHERE A.ASS_FROM = '%s' AND A.ASS_CODE = '%s' ", 
+			FromDate, (Year + 1) % 100, FromDate, FromDate, AssetCode);  
+	FloatRepoSql.len = strlen(FloatRepoSql.arr);
+
+	EXEC SQL PREPARE SAARYearbase FROM :FloatRepoSql;
+	EXEC SQL DECLARE CAARYearbase CURSOR FOR SAARYearbase;
+	EXEC SQL OPEN CAARYearBase;
+
+	AARYearBase = 0;
+	for(;;)
+	{
+		EXEC SQL FETCH CAARYearbase INTO :AARYearBase:NULLIndicator;
+		if(sqlca.sqlcode == 1403)
+			break;
+	}
+
+	EXEC SQL CLOSE CAARYearBase;
+
+	if(AARYearBase < 365)
+		AARYearBase = 365;
+
+	return AARYearBase;
+
+label1:
+	SqlError("GetAARYearBase", 1);
+	return 0;
+}
+/************************************************
+************************************************/
+/* int UpdateXCurrencyFxrate(const char *Date)
+{
+	char xport[11], xasset[11], sql[50];
+
+	EXEC SQL WHENEVER SQLERROR GOTO label1;
+
+	EXEC SQL DELETE SEMAM.NW_XCURRENCY_FXRATE;
+	EXEC SQL DELETE SEMAM.NW_ASSET_POS;
+	
+	printf("Update XCurrency Position\n");
+	SaveCopy(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "INSERT INTO SEMAM.NW_ASSET_POS "
+			"(INDATE, PORTFOLIO, ASSET_CODE) ", 0);
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "SELECT DISTINCT TRUNC(SYSDATE), PORTFOLIO, "
+			"NVL(A.ASSET_CODE, A.INV_ASSET_CODE) ");
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "FROM SEMAM.ALL_TICKET_INV_V A "
+			"JOIN SEMAM.NW_ASSETS B ON (NVL(A.ASSET_CODE, A.INV_ASSET_CODE) = B.ASS_CODE "
+										"AND B.ASS_INDUSTRY = 'CURRENCY FWDS') "
+			"WHERE A.TRANS_TYPE = 'FOREX' "
+			"AND A.TR_DESC = 'BOOKING' ");
+
+	if(Date && strlen(Date) > 0)
+	{
+		sprintf_s(sql, sizeof(sql), "AND A.TRADE_DATE <= '%s' ", Date);
+		SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), sql);
+	}
+
+	FloatRepoSql.len = strlen(FloatRepoSql.arr);
+	
+	EXEC SQL PREPARE SUpdateXCurrencyAsset FROM :FloatRepoSql;
+	EXEC SQL EXECUTE SUpdateXCurrencyAsset;
+	
+	printf("Populate XCurrency Position\n");
+	SaveCopy(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "INSERT INTO SEMAM.NW_XCURRENCY_FXRATE "
+			"(PORTFOLIO, ASSET_CODE, TRANS_NUM, CURRENCY, TRADE_DATE, FXRATE) ", 0);
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "SELECT PORTFOLIO, ASSET_CODE, TRANS_NUM, "
+			"CURRENCY, TRADE_DATE, NVL(FXRATE, CROSS_RATE) ");
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "FROM SEMAM.ALL_TICKET_INV_V A "
+			"JOIN SEMAM.NW_ASSETS B ON (A.ASSET_CODE = B.ASS_CODE AND B.ASS_INDUSTRY = 'CURRENCY FWDS') "
+			"WHERE A.CURRENCY != 'USD' "
+			"AND A.TRANS_TYPE IN ('SECURITIES') ");
+	if(Date && strlen(Date) > 0)
+	{
+		sprintf_s(sql, sizeof(sql), "AND A.TRADE_DATE <= '%s' ", Date);
+		SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), sql);
+	}
+
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "UNION ");
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "SELECT PORTFOLIO, "
+			"NVL(A.ASSET_CODE, A.INV_ASSET_CODE), TRANS_NUM, CURRENCY, TRADE_DATE, FXRATE ");
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "FROM SEMAM.ALL_TICKET_INV_V A "
+			"JOIN SEMAM.NW_ASSETS B ON (NVL(A.ASSET_CODE, A.INV_ASSET_CODE) = B.ASS_CODE "
+										"AND B.ASS_INDUSTRY = 'CURRENCY FWDS') ");
+			"WHERE A.CURRENCY != 'USD' "
+			"AND A.TRANS_TYPE IN ('FOREX') "
+			"AND A.TR_DESC = 'BOOKING' ");
+	if(Date && strlen(Date) > 0)
+		SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), sql);
+	FloatRepoSql.len = strlen(FloatRepoSql.arr);
+
+	EXEC SQL PREPARE SUpdateXCurrencyTrade FROM :FloatRepoSql;
+	EXEC SQL EXECUTE SUpdateXCurrencyTrade;
+
+	printf("Populate XCurrency Position Fxrate\n");
+	SaveCopy(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "SELECT A.PORTFOLIO, A.ASSET_CODE, "
+			"TRANS_NUM, TRANS_TYPE, TRADE_DATE, NVL(FXRATE, CROSS_RATE) ", 0);
+	SaveConcatenate(FloatRepoSql.arr), sizeof(FloatRepoSql.arr), "FROM SEMAM.ALL_TICKET_INV_V A "
+			"JOIN SEMAM.NW_ASSETS B ON (A.ASSET_CODE = B.ASS_CODE AND B.ASS_INDUSTRY = 'CURRENCY FWDS') "
+			"JOIN SEMAM.NW_ASSET_POS C ON (A.PORTFOLIO = C.PORTFOLIO AND A.ASSET_CODE = C.ASSET_CODE) ");
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "WHERE A.CURRENCY != 'USD' "
+			"AND A.TRANS_TYPE IN ('SECURITIES') ");
+	if(Date && strlen(Date) > 0)
+	{
+		sprintf_s(sql, sizeof(sql), "AND A.TRADE_DATE <= '%s' ", Date);
+		SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), sql);
+	}
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "UNION ");
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "SELECT A.PORTFOLIO, "
+			"NVL(A.ASSET_CODE, A.INV_ASSET_CODE), TRANS_NUM, TRANS_TYPE, TRADE_DATE, FXRATE ");
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "FROM SEMAM.ALL_TICKET_INV_V A "
+			"JOIN SEMAM.NW_ASSETS B ON (NVL(A.ASSET_CODE, NVL(A.INV_ASSET_CODE) = B.ASS_CODE "
+						"AND B.ASS_INDUSTRY = 'CURRENCY FWDS') " 
+			"JOIN SEMAM.NW_ASSET_POS C ON (A.PORTFOLIO = C.PORTFOLIO "
+					"AND NVL(A.ASSET_CODE, A.INV_ASSET_CODE) = C.ASSET_CODE) ");
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "WHERE A.TRANS_TYPE IN ('FOREX') "
+			"AND A.TR_DESC = 'BOOKING' ");
+
+	if(Date && strlen(Date) > 0)
+	{
+		SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), sql);
+	}
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "ORDER BY 1, 2, 4, 3 ");
+	FloatRepoSql.len = strlen(FloatRepoSql.arr);
+
+	EXEC SQL PREPARE SUpdateXCurrency FROM :FloatRepoSql;
+	EXEC SQL DECLARE CUpdateXCurrency CURSOR FOR SUpdateXCurrency;
+	EXEC SQL OPEN CUpdateXCurrency;
+ 
+	FloatRepoXFxrate = 0;
+	xport[0] = 0;
+	xasset[0] = 0;
+	for(;;)
+	{
+		FloatRepoTransNum = 0;
+		FloatRepoRate = 0;
+		EXEC SQL FETCH CUpdateXCurrency INTO :FloatRepoPortfolio:NULLIndicator, :FloatAsset:NULLIndicator, 
+					:FloatRepoTransNum:NULLIndicator, :FloatXType:NULLIndicator, :FloatRepoFrom:NULLIndicator, 
+					:FloatRepoRate:NULLIndicator;
+		if(sqlca.sqlcode == 1403)
+			break;
+
+		FloatRepoPortfolio.arr[FloatRepoPortfolio.len] = 0;
+		FloatAsset.arr[FloatAsset.len] = 0;
+		FloatXType.arr[FloatXType.len] = 0;
+		FloatRepoFrom.arr[FloatRepoFrom.len] = 0;
+
+		if(strcmp(FloatRepoPortfolio.arr, xport) || strcmp(FloatAsset.arr, xasset))
+		{
+			SaveCopy(xport, sizeof(xport), FloatRepoPortfolio.arr, 0);
+			SaveCopy(xasset, sizeof(xasset), FloatAsset.arr, 0);
+			FloatRepoXFxrate = 0;
+		}
+
+		if(strcmp(FloatXType.arr, "FOREX") == 0)
+		{
+			FloatRepoXFxrate = FloatRepoRate;
+			SaveCopy(FloatRepoTo.arr, sizeof(FloatRepoTo.arr), FloatRepoFrom.arr, 0);
+			FloatRepoTo.len = strlen(FloatRepoTo.arr);
+		}
+		else
+			if(FloatRepoXFxrate > 0)
+			{
+				EXEC SQL UPDATE SEMAM.NW_XCURRENCY_FXRATE SET TRADE_DATE = :FloatRepoTo, 
+						 FXRATE = :FloatRepoXFxrate WHERE TRANS_NUM = :FloatRepoTransNum;
+				sqlca.sqlcode = 1;
+			}
+	}
+
+	EXEC SQL CLOSE CUpdateXCurrency;
+	EXEC SQL COMMIT;
+
+	return 1;
+
+label1:
+	SqlError("UpdateXCurrency", 1);
+	return 0;
+} */
+/************************************************
+************************************************/
+int UpdateXCurrencyTradeFxrate(const char *Date)
+{
+	char xport[11], xasset[11];
+
+	EXEC SQL WHENEVER SQLERROR GOTO label1;
+
+	sprintf_s(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "DELETE SEMAM.NW_XCURRENCY_TRADE_FXRATE "
+		"WHERE FIX_DATE - TO_DATE('%s') < 180 ", Date);
+	FloatRepoSql.len = strlen(FloatRepoSql.arr);
+	
+	EXEC SQL PREPARE SUpdateXCurrencyTradeFxDel FROM :FloatRepoSql;
+	EXEC SQL EXECUTE SUpdateXCurrencyTradeFxDel;
+	
+	sprintf_s(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "SELECT A.PORTFOLIO, A.ASSET_CODE, "
+		"A.TRADE_DATE, A.TRANS_TYPE, A.TRANS_NUM, A.FXRATE, C.TRANS_NUM "
+		"FROM SEMAM.NW_TR_TICKETS A "
+		"JOIN SEMAM.NW_ASSETS B ON (A.ASSET_CODE = B.ASS_CODE AND B.ASS_INDUSTRY = 'CURRENCY FWDS') "
+		"LEFT OUTER JOIN SEMAM.NW_XCURRENCY_TRADE_FXRATE C ON (A.TRANS_NUM = C.TRANS_NUM) "
+		"WHERE A.TRANS_TYPE IN ('FOREX', 'SECURITIES') "
+		"AND A.CURRENCY != 'USD' "
+		"AND A.TRADE_DATE <= '%s' ", Date);
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "ORDER BY 1, 2, 3 DESC, 4, 5 DESC ");
+	FloatRepoSql.len = strlen(FloatRepoSql.arr);
+
+	EXEC SQL PREPARE SUpdateXCurrencyTradeFx FROM :FloatRepoSql;
+	EXEC SQL DECLARE CUpdateXCurrencyTradeFx CURSOR FOR SUpdateXCurrencyTradeFx;
+	EXEC SQL OPEN CUpdateXCurrencyTradeFx;	
+	
+	xport[0] = 0;
+	for(;;)
+	{
+		FloatRepoTransNum = 0;
+		FloatRepoRate = 0;
+		FloatRepoInvNum = 0;
+		EXEC SQL FETCH CUpdateXCurrencyTradeFx INTO :FloatRepoPortfolio:NULLIndicator, 
+					:FloatAsset:NULLIndicator, :FloatRepoFrom:NULLIndicator, 
+					:FloatXType:NULLIndicator, :FloatRepoTransNum:NULLIndicator, 
+					:FloatRepoRate:NULLIndicator, :FloatRepoInvNum:NULLIndicator;
+		if(sqlca.sqlcode == 1403)
+			break;
+		
+		FloatRepoPortfolio.arr[FloatRepoPortfolio.len] = 0;
+		FloatAsset.arr[FloatAsset.len] = 0;
+		FloatRepoFrom.arr[FloatRepoFrom.len] = 0;
+		FloatXType.arr[FloatXType.len] = 0;
+		
+		if(strcmp(FloatRepoPortfolio.arr, xport) || strcmp(FloatAsset.arr, xasset))
+		{
+			FloatRepoXFxrate = -1;
+			SaveCopy(xport, sizeof(xport), FloatRepoPortfolio.arr, 0);
+			SaveCopy(xasset, sizeof(xasset), FloatAsset.arr, 0);
+		}
+
+		if(strstr(FloatXType.arr, "FOREX") && FloatRepoRate > 0)
+		{
+			FloatRepoXFxrate = FloatRepoRate;
+			SaveCopy(FloatRepoTo.arr, sizeof(FloatRepoTo.arr), FloatRepoFrom.arr, 0);
+			FloatRepoTo.len = strlen(FloatRepoTo.arr);
+		}
+
+		if(strstr(FloatXType.arr, "SECURITIES") && FloatRepoXFxrate > 0 && !FloatRepoInvNum)
+		{
+			EXEC SQL INSERT INTO SEMAM.NW_XCURRENCY_TRADE_FXRATE (TRANS_NUM, FIX_DATE, 
+					FXRATE)	VALUES (:FloatRepoTransNum, :FloatRepoTo, :FloatRepoXFxrate);
+		}			
+	}	
+
+	EXEC SQL CLOSE CUpdateXCurrencyTradeFx;
+	EXEC SQL COMMIT;
+
+	return 1;
+
+label1:
+	SqlError("UpdateXCurrencyTradeFxrate", 1);
+	return 0;
+}
+/************************************************
+************************************************/
+double GetTradeFxrate(const char *Currency, const char *Date)
+{
+	if(!Currency || strlen(Currency) == 0)
+		FloatRepoXFxrate = -1;
+	else
+		if(strstr(Currency, "USD"))
+			FloatRepoXFxrate = 1;
+		else
+			FloatRepoXFxrate = 0;
+
+	if(FloatRepoXFxrate != 0)
+		return FloatRepoXFxrate;
+
+	SaveCopy(FloatCurrency.arr, sizeof(FloatCurrency.arr), Currency, 0);
+	FloatCurrency.len = strlen(FloatCurrency.arr);
+
+	SaveCopy(FloatRepoFrom.arr, sizeof(FloatRepoFrom.arr), Date, 0);
+	FloatRepoFrom.len = strlen(FloatRepoFrom.arr);
+
+	EXEC SQL WHENEVER SQLERROR GOTO label1;
+
+	EXEC SQL SELECT EXRATE INTO :FloatRepoXFxrate:NULLIndicator FROM SEMAM.NW_EXRATES A 
+	         WHERE A.CURRENCY = :FloatCurrency 
+			 AND A.INDATE = (SELECT MAX(INDATE) FROM SEMAM.NW_EXRATES B 
+							 WHERE B.CURRENCY = :FloatCurrency 
+							 AND B.INDATE <= :FloatRepoFrom
+							 AND B.EXRATE IS NOT NULL);
+	return FloatRepoXFxrate;
+
+label1:
+	SqlError("GetTradeFxrate", 1);
+	return 0;
+}
+/************************************************
+************************************************/
+double GetOptionFxrate(long OptTransNum, const char *Currency, const char *Date)
+{
+	FloatRepoXFxrate = -1;
+
+	if(OptTransNum <= 0)
+		return FloatRepoXFxrate;
+
+	FloatRepoXFxrate = 0;
+	FloatRepoTransNum = OptTransNum;
+
+	EXEC SQL SELECT NVL(NVL(A.FXRATE, A.CROSS_RATE)/NVL(CONVERSION, 1), -1)	
+				INTO :FloatRepoXFxrate:NULLIndicator 
+			 FROM SEMAM.ALL_TICKET_INV_V A, SEMAM.NW_COUNTRIES X
+			 WHERE A.TRANS_NUM = :FloatRepoTransNum
+			 AND A.CURRENCY = X.CURRENCY;
+	
+	if(FloatRepoXFxrate > 0)
+		return FloatRepoXFxrate;
+	else
+		return GetTradeFxrate(Currency, Date);
+
+label1:
+	SqlError("GetOptionFxrate", 1);
+	return 0;
+}
+/*****************************************
+*****************************************/
+int GetPortfolioAccountList(PortfolioAccountType *PortAcctArray, int *PortAcctCount)
+{
+	SaveCopy(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "SELECT A.PORTFOLIO, A.CUSTODIAN, "
+		"A.EURO_CLEAR, A.ACCOUNT, A.ACCOUNT2, A.ACC_NUM, A.BANK, A.CUSTODIAN_ACCOUNT, "
+		"CUSTODIAN_CODE, MARGIN, A.CONTACT, A.FAX, A.PHONE ", 0);
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "FROM SEMAM.NW_PORTFOLIO_ACCOUNTS A "
+		"JOIN SEMAM.NW_PORTFOLIOS Z ON (A.PORTFOLIO = Z.PORTFOLIO AND Z.STATUS IS NULL) "
+		"ORDER BY 1, 4 ");
+	FloatRepoSql.len = strlen(FloatRepoSql.arr);
+
+	EXEC SQL PREPARE SPortfolioAccountList FROM :FloatRepoSql;
+	EXEC SQL DECLARE CPortfolioAccountList CURSOR FOR SPortfolioAccountList;
+	EXEC SQL OPEN CPortfolioAccountList;
+
+	*PortAcctCount = 0;
+	for(;;)
+	{
+		EXEC SQL FETCH CPortfolioAccountList INTO :FloatRepoPortfolio:NULLIndicator, 
+					:FloatCustodian:NULLIndicator, :FloatEuroClear:NULLIndicator, 
+					:FloatAccount:NULLIndicator, :FloatAccount2:NULLIndicator, 
+					:FloatAccountID:NULLIndicator, :FloatBank:NULLIndicator, 
+					:FloatCustodianAccount:NULLIndicator, :FloatCustodianCode:NULLIndicator,
+					:FloatMargin:NULLIndicator, :FloatContact:NULLIndicator, 
+					:FloatFax:NULLIndicator, :FloatPhone:NULLIndicator;
+
+		FloatRepoPortfolio.arr[FloatRepoPortfolio.len] = 0;
+		FloatCustodian.arr[FloatCustodian.len] = 0;
+		FloatEuroClear.arr[FloatEuroClear.len] = 0;
+		FloatAccount.arr[FloatAccount.len] = 0;
+		FloatAccount2.arr[FloatAccount2.len] = 0;
+		FloatAccountID.arr[FloatAccountID.len] = 0;
+		FloatBank.arr[FloatBank.len] = 0;
+		FloatCustodianAccount.arr[FloatCustodianAccount.len] = 0;
+		FloatCustodianCode.arr[FloatCustodianCode.len] = 0;
+		FloatMargin.arr[FloatMargin.len] = 0;
+		FloatContact.arr[FloatContact.len] = 0;
+		FloatFax.arr[FloatFax.len] = 0;
+		FloatPhone.arr[FloatPhone.len] = 0;
+
+		if(sqlca.sqlcode == 1403)
+			break;
+
+		SaveCopy(PortAcctArray[*PortAcctCount].Portfolio, sizeof(PortAcctArray[*PortAcctCount].Portfolio), FloatRepoPortfolio.arr, 0);
+		SaveCopy(PortAcctArray[*PortAcctCount].Custodian, sizeof(PortAcctArray[*PortAcctCount].Custodian), FloatCustodian.arr, 0);
+		SaveCopy(PortAcctArray[*PortAcctCount].EuroClear, sizeof(PortAcctArray[*PortAcctCount].EuroClear), FloatEuroClear.arr, 0);
+		SaveCopy(PortAcctArray[*PortAcctCount].Account, sizeof(PortAcctArray[*PortAcctCount].Account), FloatAccount.arr, 0);
+		SaveCopy(PortAcctArray[*PortAcctCount].Account2, sizeof(PortAcctArray[*PortAcctCount].Account2), FloatAccount2.arr, 0);
+		SaveCopy(PortAcctArray[*PortAcctCount].AccountID, sizeof(PortAcctArray[*PortAcctCount].AccountID), FloatAccountID.arr, 0);
+		SaveCopy(PortAcctArray[*PortAcctCount].Bank, sizeof(PortAcctArray[*PortAcctCount].Bank), FloatBank.arr, 0);
+		SaveCopy(PortAcctArray[*PortAcctCount].CustodianAccount, sizeof(PortAcctArray[*PortAcctCount].CustodianAccount), FloatCustodianAccount.arr, 0);
+		SaveCopy(PortAcctArray[*PortAcctCount].CustodianCode, sizeof(PortAcctArray[*PortAcctCount].CustodianCode), FloatCustodianCode.arr, 0);
+		SaveCopy(PortAcctArray[*PortAcctCount].Margin, sizeof(PortAcctArray[*PortAcctCount].Margin), FloatMargin.arr, 0);
+		SaveCopy(PortAcctArray[*PortAcctCount].Contact, sizeof(PortAcctArray[*PortAcctCount].Contact), FloatContact.arr, 0);
+		SaveCopy(PortAcctArray[*PortAcctCount].Fax, sizeof(PortAcctArray[*PortAcctCount].Fax), FloatFax.arr, 0);
+		SaveCopy(PortAcctArray[*PortAcctCount].Phone, sizeof(PortAcctArray[*PortAcctCount].Phone), FloatPhone.arr, 0);
+		(*PortAcctCount) ++;
+	}
+
+	EXEC SQL CLOSE CPortfolioAccountList; 
+	return *PortAcctCount;
+
+label1:
+	SqlError("GetPortAccountList", 1);
+	return 0;
+}
+/*****************************************
+*****************************************/
+int FindPortfolioAccountID(const char *Portfolio, const char *Account, PortfolioAccountType *PortAcctArray, 
+						int PortAcctCount, char *AccountID)
+{
+	int i;
+
+	AccountID[0] = 0;
+	for (i = 0; i < PortAcctCount; i++)
+	{
+		if(strcmp(Portfolio, PortAcctArray[i].Portfolio) == 0 && strcmp(Account, PortAcctArray[i].Account) == 0)
+		{
+			SaveCopy(AccountID, sizeof(PortAcctArray[i].AccountID), PortAcctArray[i].AccountID, 0);
+			return i;
+		}
+	}
+	return -1;
+}
+/*****************************************
+*****************************************/
+double ComputeBondPrice(double Rate, double Yield, double YearToMaturity, int Freq)
+{
+	double BondPrice;
+
+	if(Rate == 0)
+		BondPrice = 100/pow(1 + Yield, YearToMaturity);
+	else
+		BondPrice = (Rate/Freq)*(1 - pow(1 + Yield, -YearToMaturity*Freq))/Yield + 
+					100/pow(1 + Yield, YearToMaturity*Freq);
+
+	return BondPrice;
+}
+/*****************************************
+*****************************************/
+double YTMYield(const char *Asset, const char *Date, double Price)
+{
+	double YearToMaturity, Rate;
+	int Freq;
+
+	sprintf_s(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "SELECT RATE, ASS_PAYMENT_FREQUENCY, "
+		"DECODE(ASS_MATURITY_DATE, NULL, -1, (ASS_MATURITY_DATE - TO_DATE('%s'))/365) "
+		"FROM SEMAM.NW_ASSETS A, SEMAM.NW_ASS_PERIODS B "
+		"WHERE A.ASS_CODE = B.ASS_CODE "
+		"AND B.ASS_FROM <= '%s' "
+		"AND B.ASS_TO > '%s' "
+		"AND A.ASS_CODE = '%s' ", Date, Date, Date, Asset);
+	FloatRepoSql.len = strlen(FloatRepoSql.arr);
+
+	EXEC SQL PREPARE SYTMYield FROM :FloatRepoSql;
+	EXEC SQL DECLARE CYTMYield CURSOR FOR SYTMYield;
+	EXEC SQL OPEN CYTMYield; 
+
+	for(;;)
+	{
+		EXEC SQL FETCH CYTMYield INTO :FloatRepoRate:NULLIndicator, :AARYearBase:NULLIndicator, 
+									  :FloatRepoXFxrate:NULLIndicator;
+
+		if(sqlca.sqlcode == 1403)
+			break;
+
+		if(FloatRepoXFxrate < 0)
+			return 0;
+	} 
+
+	EXEC SQL CLOSE CYTMYield;
+
+	Rate = FloatRepoRate;
+	YearToMaturity = FloatRepoXFxrate;
+	Freq = AARYearBase;
+
+	return YTMYield2(Price, Rate, YearToMaturity, Freq);
+
+label1:
+	SqlError("YTMYield", 1);
+	return 0;
+}
+/*****************************************
+*****************************************/
+double YTMYield2(double Price, double Rate, double YearToMaturity, int Freq)
+// Note: Rate is rate * 100.
+{
+	double HighYield = .0001, LowYield = 0.9999;
+	double LowPrice, HighPrice, CurrentPrice, CurrentYield;
+	int Count = 0;
+
+	if(Rate == 0)
+	{
+		CurrentYield = pow(100/Price, 1/YearToMaturity) - 1;
+		return CurrentYield;
+	}
+
+	LowPrice = ComputeBondPrice(Rate, LowYield, YearToMaturity, Freq);
+	HighPrice = ComputeBondPrice(Rate, HighYield, YearToMaturity, Freq);
+
+	if(LowPrice > Price || HighPrice < Price)
+		return 0;
+	CurrentYield = (HighYield + LowYield)/2;
+
+	for(;;)
+	{
+		CurrentPrice = ComputeBondPrice(Rate, CurrentYield, YearToMaturity, Freq);
+
+		if(fabs(Price - CurrentPrice) < 0.0001)
+			return CurrentYield;
+
+		if(Count == 2000) // iteration up to 2000 times
+			return 0;
+
+		if(CurrentPrice < Price && CurrentPrice > LowPrice)
+		{
+			LowYield = CurrentYield;
+			LowPrice = CurrentPrice;
+		}
+		else
+			if(CurrentPrice > Price && CurrentPrice < HighPrice)
+			{
+				HighYield = CurrentYield;
+				HighPrice = CurrentPrice;
+			}
+
+		CurrentYield = (LowYield + HighYield)/2;
+		Count ++;
+	}
+}
+/*****************************************
+*****************************************/
+void UpdateOptionPosition(const char *Date)
+{
+	if(!Date || strlen(Date) == 0)
+		return;
+	
+	SaveCopy(FloatRepoTo.arr, sizeof(FloatRepoTo.arr), Date, 0);
+	FloatRepoTo.len = strlen(FloatRepoTo.arr);
+	
+	EXEC SQL DELETE FROM SEMAM.NW_TEMP_OPTIONS;
+	EXEC SQL INSERT INTO SEMAM.NW_TEMP_OPTIONS (TRANS_NUM, PORTFOLIO, TICKET_NUM, 
+					TRADE_DATE, VALUE_DATE, TRANS_TYPE, TRANS_DIRECTION, NOM_AMOUNT, 
+					PRICE, ASSET_CODE, COUNTERPARTY, CON_CODE, OPTION_BACKING, 
+					EXERCISE_PRICE, EXERCISE_DATE, OPT_EXPIRATION, CURRENCY, 
+					FXRATE, BROKER, BR_FEES, LEV_RATE, DEAL_TYPE, TRADER_INI, 
+					CUSTODIAN, OPT_TICK, OPT_ID, EURO_OPT, OPT_AUTO, OPT_SET_CODE, 
+					OPT_SET_CODE2, SET_CONVENTION, DELIVERY_DATE, LISTED, CP_TRADE_ID, 
+					MARGIN, MARGIN_CURRENCY, MARGIN_AMOUNT, FX_DATE, BINARY, VAR, 
+					SHORT_SALE, SEC_FEE, OR_FEE, HAN_DETAIL1, HAN_DETAIL2)
+			SELECT A.TRANS_NUM, A.PORTFOLIO, A.TICKET_NUM, A.TRADE_DATE, A.VALUE_DATE, 
+					A.TRANS_TYPE, A.TRANS_DIRECTION, A.NOM_AMOUNT - NVL(SUM(B.NOM_AMOUNT),0), 
+					A.PRICE, A.ASSET_CODE, A.COUNTERPARTY, A.CON_CODE, A.OPTION_BACKING, 
+					A.EXERCISE_PRICE, A.EXERCISE_DATE, A.OPT_EXPIRATION, A.CURRENCY, 
+					A.FXRATE, A.BROKER, A.BR_FEES, A.LEV_RATE, A.DEAL_TYPE, A.TRADER_INI, 
+					A.CUSTODIAN, A.OPT_TICK, A.OPT_ID, A.EURO_OPT, A.OPT_AUTO, 
+					A.OPT_SET_CODE, A.OPT_SET_CODE2, A.SET_CONVENTION, A.DELIVERY_DATE, 
+					A.LISTED, A.CP_TRADE_ID, A.MARGIN, A.MARGIN_CURRENCY, A.MARGIN_AMOUNT, 
+					A.FX_DATE, A.BINARY, A.VAR, A.SHORT_SALE, A.SEC_FEE, A.OR_FEE, 
+					A.HAN_DETAIL1, A.HAN_DETAIL2 
+					FROM SEMAM.NW_TR_TICKETS A, SEMAM.NW_TR_TICKETS B
+					WHERE A.TRANS_NUM = B.OPTION_BACKING(+)
+					AND B.TRADE_DATE(+) <= :FloatRepoTo
+					AND A.OPTION_BACKING IS NULL
+					AND A.TRANS_TYPE IN  ('CALL','PUT')
+					AND LEAST(A.TRADE_DATE, A.VALUE_DATE) <= :FloatRepoTo 
+					AND (A.OPT_EXPIRATION IS NULL OR A.OPT_EXPIRATION > :FloatRepoTo)
+					AND (A.EXERCISE_DATE IS NULL OR A.EXERCISE_DATE > :FloatRepoTo)
+					GROUP BY A.TRANS_NUM, A.PORTFOLIO, A.TICKET_NUM, A.TRADE_DATE, A.VALUE_DATE, 
+					A.TRANS_TYPE, A.TRANS_DIRECTION, A.PRICE, A.ASSET_CODE, A.COUNTERPARTY, 
+					A.CON_CODE, A.OPTION_BACKING, A.EXERCISE_PRICE, A.EXERCISE_DATE, A.NOM_AMOUNT,
+					A.OPT_EXPIRATION, A.CURRENCY, A.FXRATE, A.BROKER, A.BR_FEES, A.LEV_RATE, 
+					A.DEAL_TYPE, A.TRADER_INI, A.CUSTODIAN, A.OPT_TICK, A.OPT_ID, A.EURO_OPT, 
+					A.OPT_AUTO, A.OPT_SET_CODE, A.OPT_SET_CODE2, A.SET_CONVENTION, A.DELIVERY_DATE, 
+					A.LISTED, A.CP_TRADE_ID, A.MARGIN, A.MARGIN_CURRENCY, A.MARGIN_AMOUNT, A.FX_DATE, 
+					A.BINARY, A.VAR, A.SHORT_SALE, A.SEC_FEE, A.OR_FEE, A.HAN_DETAIL1, A.HAN_DETAIL2 
+					HAVING A.NOM_AMOUNT - NVL(SUM(B.NOM_AMOUNT),0) > 0;
+	return;
+
+label1:
+	SqlError("UpdateOptionPosition", 1);
+	return;
+}
+
+/*****************************************
+*****************************************/
+void UpdateFullPosition(const char *Date)
+{
+	if(!Date || strlen(Date) == 0)
+		return;
+
+	SaveCopy(FloatRepoTo.arr, sizeof(FloatRepoTo.arr), Date, 0);
+	FloatRepoTo.len = strlen(FloatRepoTo.arr);
+
+	UpdateOptionPosition(Date);
+
+	EXEC SQL DELETE SEMAM.NW_FULL_POSITION;
+
+	SaveCopy(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "INSERT INTO SEMAM.NW_FULL_POSITION "
+			"(INDATE, PORTFOLIO, TRANS_TYPE, ASSET_CODE, CURRENCY, DEAL_TYPE, TRANS_NUM, "
+			"AMORT_FACT, MARKET, EXRATE, NOM_AMOUNT) ", 0);
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "SELECT :d1, A.PORTFOLIO, "
+			"A.TRANS_TYPE, A.ASSET_CODE, NVL(X.NEW_CURRENCY, X.CURRENCY), "
+			"NVL(A.DEAL_TYPE, '9'), TO_NUMBER(NULL), NVL(AMORT_FACT, 1), MARKET, EXRATE, "
+			"SUM(DECODE(A.DIR, 'P', 1, 'S', -1)*A.NOM_AMOUNT/DECODE(ASS_TYPE, 'EQUITY TYPE CAL', 1, NVL(CONVERSION, 1))) ");
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "FROM SEMAM.ALL_TICKET_INV_V A, "
+			"SEMAM.NW_ASSETS B, SEMAM.NW_ASS_PERIODS C, SEMAM.NW_MARKET_PRICES D, "
+			"SEMAM.NW_CURRENCY X, SEMAM.NW_EXRATES E, SEMAM.NW_PORTFOLIOS Z ");
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "WHERE B.ASS_CODE = A.ASSET_CODE "
+			"AND C.ASS_CODE(+) = A.ASSET_CODE "
+			"AND C.ASS_FROM(+) <= :d2 "
+			"AND C.ASS_TO(+) > :d3 "
+			"AND D.ASSET = A.ASSET_CODE "
+			"AND D.PR_DATE = :d4 "
+			"AND X.CURRENCY = A.CURRENCY "
+			"AND E.CURRENCY = NVL(X.NEW_CURRENCY, X.CURRENCY) "
+			"AND E.INDATE = :d5 "
+			"AND Z.PORTFOLIO = A.PORTFOLIO "
+			"AND Z.STATUS IS NULL "
+			"AND TRANS_TYPE IN ('CDS', 'SECURITIES') "
+			"AND TRADE_DATE <= :d6 ");
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "GROUP BY A.PORTFOLIO, A.TRANS_TYPE, A.ASSET_CODE, "
+			"NVL(X.NEW_CURRENCY, X.CURRENCY), NVL(A.DEAL_TYPE, '9'), NVL(AMORT_FACT, 1), MARKET, EXRATE ");
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), 
+			"HAVING SUM(DECODE(DIR, 'P', 1, 'S', -1)*NOM_AMOUNT/DECODE(ASS_TYPE, 'EQUITY TYPE CAL', 1, NVL(CONVERSION, 1))) != 0 ");
+
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "UNION ");
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "SELECT :d7, A.PORTFOLIO, A.TRANS_TYPE, "
+			"A.ASSET_CODE, A.CURRENCY, NULL, A.TRANS_NUM, NVL(AMORT_FACT, 1), "
+			"MARKE_PER_UNIT*EXRATE, EXRATE, A.NOM_AMOUNT/DECODE(ASS_TYPE, 'EQUITY TYPE CAL', 1, NVL(CONVERSION, 1)) ");
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "FROM SEMAM.NW_TEMP_OPTIONS A, "
+			"SEMAM.NW_ASSETS B, SEMAM.NW_ASS_PERIODS C, SEMAM.NW_OPT_GRKS D, "
+			"SEMAM.NW_CURRENCY X, SEMAM.NW_EXRATES E, SEMAM.NW_PORTFOLIOS Z ");
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "WHERE B.ASS_CODE = A.ASSET_CODE "
+			"AND C.ASS_CODE(+) = A.ASSET_CODE "
+			"AND C.ASS_FROM(+) <= :d8 "
+			"AND C.ASS_TO(+) > :d9 "
+			"AND D.TRANS_NUM = A.TRANS_NUM "
+			"AND D.INDATE = :d10 "
+			"AND X.CURRENCY = A.CURRENCY "
+			"AND E.CURRENCY = NVL(X.NEW_CURRENCY, X.CURRENCY) "
+			"AND E.INDATE = :d11 "
+			"AND Z.PORTFOLIO = A.PORTFOLIO "
+			"AND Z.STATUS IS NULL "
+			"AND A.TRANS_TYPE IN ('CALL', 'PUT') "
+			"AND A.NOM_AMOUNT > 0 ");
+
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "UNION ");
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "SELECT :d12, A.PORTFOLIO, A.TRANS_TYPE, "
+			"A.ASSET_CODE, A.CURRENCY, NULL, A.TRANS_NUM, 1, VALUE*EXRATE, EXRATE, A.NOM_AMOUNT ");
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "FROM SEMAM.ALL_TICKET_INV_V A, "
+			"SEMAM.NW_DEAL_NAV C, SEMAM.NW_EXRATES D, SEMAM.NW_PORTFOLIOS Z ");
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "WHERE C.TRANS_NUM = A.TRANS_NUM "
+			"AND C.INDATE = :d13 "
+			"AND D.CURRENCY = A.CURRENCY "
+			"AND D.INDATE = :d14 "
+			"AND Z.PORTFOLIO = A.PORTFOLIO "
+			"AND Z.STATUS IS NULL "
+			"AND A.TRANS_TYPE IN ('INT. SWAP') "
+			"AND A.TRADE_DATE <= :d15 "
+			"AND NVL(ACTUAL_VDATE, NVL(MATURITY_DATE, TO_DATE(:d16) + 1)) > :d17 ");
+
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "UNION ");
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "SELECT :d18, A.PORTFOLIO, A.TRANS_TYPE, "
+			"A.ASSET_CODE, A.CURRENCY, NVL(A.DEAL_TYPE, '9'), A.TRANS_NUM, NVL(AMORT_FACT, 1), "
+			"A.PRICE, EXRATE, A.NOM_AMOUNT ");
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "FROM SEMAM.ALL_TICKET_INV_V A, "
+			"SEMAM.NW_ASS_PERIODS B, SEMAM.NW_EXRATES D, SEMAM.NW_PORTFOLIOS Z ");
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "WHERE B.ASS_CODE(+) = A.ASSET_CODE "
+			"AND B.ASS_FROM(+) <= A.VALUE_DATE "
+			"AND B.ASS_TO(+) > A.VALUE_DATE "
+			"AND D.CURRENCY = A.CURRENCY "
+			"AND D.INDATE = :d19 "
+			"AND Z.PORTFOLIO = A.PORTFOLIO "
+			"AND Z.STATUS IS NULL "
+			"AND TRANS_TYPE IN ('REPO', 'LEVERAGE') "
+			"AND TR_DESC = 'MATURITY' "
+			"AND TRADE_DATE <= :d20 "
+			"AND NVL(ACTUAL_VDATE, NVL(MATURITY_DATE, TO_DATE(:d21) + 1)) > :d22 ");
+	FloatRepoSql.len = strlen(FloatRepoSql.arr);
+
+	EXEC SQL PREPARE SUpdateFullPosition FROM :FloatRepoSql;
+	EXEC SQL EXECUTE SUpdateFullPosition USING :FloatRepoTo, :FloatRepoTo, :FloatRepoTo, 
+				:FloatRepoTo, :FloatRepoTo, :FloatRepoTo, :FloatRepoTo, :FloatRepoTo, 
+				:FloatRepoTo, :FloatRepoTo, :FloatRepoTo, :FloatRepoTo, :FloatRepoTo, 
+				:FloatRepoTo, :FloatRepoTo, :FloatRepoTo, :FloatRepoTo, :FloatRepoTo, 
+				:FloatRepoTo, :FloatRepoTo, :FloatRepoTo, :FloatRepoTo;
+
+	EXEC SQL COMMIT;
+
+    printf("UpdateFullPosition done\n");
+	return;
+
+label1:
+	SqlError("UpdateFullPosition", 1);
+}
+
+/*****************************************
+*****************************************/
+void UpdateFullPosition2(const char *FromDate, const char *Date)
+{
+	UpdateFullPosition(Date);
+	
+	SaveCopy(FloatRepoFrom.arr, sizeof(FloatRepoFrom.arr), FromDate, 0);
+	FloatRepoFrom.len = strlen(FloatRepoFrom.arr);
+	SaveCopy(FloatRepoTo.arr, sizeof(FloatRepoTo.arr), Date, 0);
+	FloatRepoTo.len = strlen(FloatRepoTo.arr);
+
+	SaveCopy(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "INSERT INTO SEMAM.NW_FULL_POSITION "
+			"(INDATE, PORTFOLIO, TRANS_TYPE, ASSET_CODE, CURRENCY, DEAL_TYPE, TRANS_NUM, "
+			"AMORT_FACT, MARKET, EXRATE, NOM_AMOUNT) ", 0);
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "SELECT DISTINCT :d1, A.PORTFOLIO, "
+			"A.TRANS_TYPE, A.ASSET_CODE, A.CURRENCY, A.DEAL_TYPE, TO_NUMBER(NULL), 1, 0, EXRATE, 0 ");
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "FROM SEMAM.ALL_TICKET_INV_V A, "
+			"SEMAM.NW_EXRATES B, SEMAM.NW_PORTFOLIOS Z ");
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "WHERE B.CURRENCY = A.CURRENCY "
+			"AND B.INDATE = :d2 "
+			"AND Z.PORTFOLIO = A.PORTFOLIO "
+			"AND Z.STATUS IS NULL "
+			"AND A.TRANS_TYPE IN ('CDS', 'SECURITIES') "
+			"AND A.TRADE_DATE > :d3 and A.TRADE_DATE <= :d4 "
+			"AND 0 = (SELECT COUNT(*) FROM SEMAM.NW_FULL_POSITION C "
+									"WHERE C.PORTFOLIO = A.PORTFOLIO "
+									"AND C.TRANS_TYPE = A.TRANS_TYPE "
+									"AND C.ASSET_CODE = A.ASSET_CODE "
+									"AND NVL(C.DEAL_TYPE, '9') = NVL(A.DEAL_TYPE, '9') "
+									"AND C.CURRENCY = A.CURRENCY) ");
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "UNION ");
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "SELECT :d5, A.PORTFOLIO, A.TRANS_TYPE, "
+			"A.ASSET_CODE, A.CURRENCY, NULL, A.TRANS_NUM, 1, 0, EXRATE, 0 ");
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "FROM SEMAM.ALL_TICKET_INV_V A, "
+			"SEMAM.NW_EXRATES B, SEMAM.NW_PORTFOLIOS Z ");
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "WHERE B.CURRENCY = A.CURRENCY "
+			"AND B.INDATE = :d6 "
+			"AND Z.PORTFOLIO = Z.PORTFOLIO "
+			"AND Z.STATUS IS NULL "
+			"AND A.TRANS_TYPE IN ('CALL', 'PUT') "
+			"AND A.OPTION_BACKING IS NULL "
+			"AND ((A.TRADE_DATE > :d7 AND A.TRADE_DATE <= :d8) OR "
+				"NVL(A.EXERCISE_DATE, A.OPT_EXPIRATION) > :d9) " 
+			"AND 0 = (SELECT COUNT(*) FROM SEMAM.NW_FULL_POSITION C WHERE C.TRANS_NUM = A.TRANS_NUM) ");
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "UNION ");
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "SELECT :d10, A.PORTFOLIO, A.TRANS_TYPE, "
+			"A.ASSET_CODE, A.CURRENCY, NULL, A.TRANS_NUM, 1, 0, EXRATE, 0 ");
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "FROM SEMAM.ALL_TICKET_INV_V A, "
+			"SEMAM.NW_EXRATES B, SEMAM.NW_PORTFOLIOS Z ");
+	SaveConcatenate(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "WHERE B.CURRENCY = A.CURRENCY "
+			"AND B.INDATE = :d11 "
+			"AND Z.PORTFOLIO = A.PORTFOLIO "
+			"AND Z.STATUS IS NULL "
+			"AND A.TRANS_TYPE IN ('INT. SWAP', 'LEVERAGE', 'REPO') "
+			"AND A.TR_DESC = 'MATURITY' "
+			"AND ((A.TRADE_DATE > :d12 AND A.TRADE_DATE <= :d13) OR "
+				"NVL(A.ACTUAL_VDATE, A.MATURITY_DATE) > :d14) "
+			"AND 0 = (SELECT COUNT(*) FROM SEMAM.NW_FULL_POSITION C WHERE C.TRANS_NUM = A.TRANS_NUM) ");
+
+	FloatRepoSql.len = strlen(FloatRepoSql.arr);
+
+	EXEC SQL PREPARE SUpdateFullPosition2 FROM :FloatRepoSql;
+	EXEC SQL EXECUTE SUpdateFullPosition2 USING :FloatRepoTo, :FloatRepoTo, :FloatRepoFrom, 
+		:FloatRepoTo, :FloatRepoTo, :FloatRepoTo, :FloatRepoFrom, :FloatRepoTo, :FloatRepoFrom, 
+		:FloatRepoTo, :FloatRepoTo, :FloatRepoFrom, :FloatRepoTo, :FloatRepoFrom;
+
+    printf("UpdateFullPosition2 done\n");
+	return;
+
+label1:
+	SqlError("UpdateFullPosition2", 1);
+}
+
+/************************************************
+************************************************/
+void GetFeeRates(double *Sec_Fee, double *Or_Fee)
+{
+	EXEC SQL BEGIN DECLARE SECTION;
+		double secfee, orfee;
+	EXEC SQL END DECLARE SECTION;
+
+	EXEC SQL SELECT SEC_FEE INTO :secfee FROM SEMAM.NW_SEC_FEE 
+				WHERE FROM_DATE <= TRUNC(SYSDATE) AND NVL(TO_DATE, SYSDATE) > TRUNC(SYSDATE);
+	
+	EXEC SQL SELECT OR_FEE INTO :orfee FROM SEMAM.NW_OR_FEE 
+				WHERE FROM_DATE <= TRUNC(SYSDATE) AND NVL(TO_DATE, SYSDATE) > TRUNC(SYSDATE);
+
+	*Sec_Fee = secfee;
+	*Or_Fee = orfee;
+	return;
+label1:
+	SqlError("GetFeeRates", 1);
+}
+/************************************************
+************************************************/
+double ComputeSecFee(int bStock, char dir, double price, double nominal, double sec_fee)
+{
+	if(bStock && dir == 'S')
+		return round(price*nominal*sec_fee/1000000 + .0049, 2);
+	else
+		return 0;
+}
+/************************************************
+************************************************/
+const char *date_stamp(char *datestamp, int date_size)
+{
+	datestamp[0] = 0;
+	EXEC SQL SELECT TO_CHAR(SYSDATE, 'DAY, MON DD YYYY HH:MI AM') INTO :FloatCustodian FROM DUAL;
+
+	FloatCustodian.arr[FloatCustodian.len] = 0;
+	SaveCopy(datestamp, date_size, FloatCustodian.arr, 0);
+	return datestamp;
+
+label1:
+	SqlError("date_stamp", 1);
+	return datestamp;
+}
+/************************************************
+************************************************/
+int GetTPlusNDate(char *Date, int DateSize, const char * SrcDate, int PlusDays, const char *Currency)
+{
+	int Days = 0;
+
+	SaveCopy(FloatRepoFrom.arr, sizeof(FloatRepoFrom.arr), SrcDate, 0);
+	FloatRepoFrom.len = strlen(FloatRepoFrom.arr);
+
+	if(!Currency || strlen(Currency) == 0)
+		SaveCopy(FloatCurrency.arr, sizeof(FloatCurrency.arr), "USD", 0);
+	else
+		SaveCopy(FloatCurrency.arr, sizeof(FloatCurrency.arr), Currency, 0);
+	FloatCurrency.len = strlen(FloatCurrency.arr);
+
+	if(PlusDays == 0)
+		SaveCopy(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "SELECT DISTINCT TO_DATE(:d1) + INC, "
+				  "DECODE(SIGN(TO_DATE(:d2) + INC - NVL(HOLIDAY, TO_DATE(:d3) - 1)), 0, 0, "
+				  "DECODE(TO_CHAR(TO_DATE(:d4) + INC, 'D'), '7', 0, '1', 0, 1)) "
+				  "FROM SEMAM.NW_HOLIDAYS A, SEMAM.MYSEQ B "
+				  "WHERE INC >= 0 "
+				  "AND HOLIDAY(+) >= :d5 "
+				  "AND HOLIDAY(+) <= TO_DATE(:d6) + INC "
+				  "AND CURRENCY(+) = :d7 "
+				  "ORDER BY 1 ", 0);
+	else
+		if(PlusDays > 0)
+			SaveCopy(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "SELECT DISTINCT TO_DATE(:d1) + INC, "
+					"DECODE(SIGN(TO_DATE(:d2) + INC - NVL(HOLIDAY, TO_DATE(:d3))), 0, 0, "
+					"DECODE(TO_CHAR(TO_DATE(:d4) + INC, 'D'), '7', 0, '1', 0, 1)) "
+					"FROM SEMAM.NW_HOLIDAYS A, SEMAM.MYSEQ B "
+					"WHERE INC >= 1 "
+					"AND HOLIDAY(+) >= :d5 "
+					"AND HOLIDAY(+) <= TO_DATE(:d6) + INC "
+					"AND CURRENCY(+) = :d7 "
+					"ORDER BY 1 ", 0);
+		else
+			SaveCopy(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "SELECT DISTINCT TO_DATE(:d1) - INC, "
+					"DECODE(SIGN(TO_DATE(:d2) - INC - NVL(HOLIDAY, TO_DATE(:d3))), 0, 0, "
+					"DECODE(TO_CHAR(TO_DATE(:d4) - INC, 'D'), '7', 0, '1', 0, 1)) "
+					"FROM SEMAM.NW_HOLIDAYS A, SEMAM.MYSEQ B "
+					"WHERE INC >= 1 "
+					"AND HOLIDAY(+) <= :d5 "
+					"AND HOLIDAY(+) >= TO_DATE(:d6) - INC "
+					"AND CURRENCY(+) = :d7 "
+					"ORDER BY 1 DESC ", 0);
+
+	FloatRepoSql.len = strlen(FloatRepoSql.arr);
+	
+	EXEC SQL PREPARE SPlusNDate FROM :FloatRepoSql;
+	EXEC SQL DECLARE CPlusNDate CURSOR FOR SPlusNDate;
+	EXEC SQL OPEN CPlusNDate USING :FloatRepoFrom, :FloatRepoFrom, :FloatRepoFrom, :FloatRepoFrom, 
+									:FloatRepoFrom, :FloatRepoFrom, :FloatCurrency; 
+	for(;;)
+	{
+		EXEC SQL FETCH CPlusNDate INTO :FloatRepoTo:NULLIndicator, :AARYearBase:NULLIndicator;
+
+		if(sqlca.sqlcode == 1403)
+			break;
+
+		SaveCopy(Date, DateSize, FloatRepoTo.arr, 0);
+		if(PlusDays == 0)
+		{
+			if(AARYearBase > 0)
+				return 1;
+		}
+		else
+		{
+			if(AARYearBase > 0)
+				Days += AARYearBase;
+			else
+				Days -= AARYearBase;
+			if(abs(Days) == abs(PlusDays))
+				return 1;
+		}
+	} 
+
+	EXEC SQL CLOSE CPlusNDate;
+	Date[0] = 0;
+	return 0;
+
+label1:
+	SqlError("GetTPlusNDate", 1);
+	return 0;
+}

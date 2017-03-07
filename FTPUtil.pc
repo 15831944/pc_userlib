@@ -1,0 +1,322 @@
+#include <stdio.h>
+#include <process.h>
+#include <string.h>
+#include "ftputil.h"
+#include <stdlib.h>
+#include "asset.h"
+#include "login.h"
+#include "gen_fun.h"
+#include "userinfo.h"
+#include "floatrepo.h"
+
+
+FTPDataType FTPData;
+const int FTPDataFileLimit = 50;
+
+int FTPEncryption(FTPDataType *pFTPData);
+int FTPDescryption(FTPDataType *pFTPData);
+int FTPGutScript(FTPDataType *pFTPData);
+int FTPPutScript(FTPDataType *pFTPData);
+
+EXEC SQL INCLUDE SQLCA;
+EXEC SQL INCLUDE oraca;
+EXEC ORACLE OPTION (ORACA=YES);
+
+int FTPDecryption(FTPDataType *pFTPData)
+{
+	char Task[500];
+	int i, status;
+
+	if(!pFTPData || strlen(pFTPData->EncryptKey) <= 0)
+		return 0;
+
+	for(i = 0; i < pFTPData->FListSize; i++)
+	{
+		sprintf_s(Task, sizeof(Task), "gpg.exe -d -o %s %s", pFTPData->FList[i].DataName, 
+					pFTPData->FList[i].GPGName);
+
+		status = system(Task);
+		if(status != 0)
+		{
+			printf("%d %d %s\n", status, errno, Task);
+			return 0;
+		}
+	}
+	
+	return 1;
+}
+
+int FTPEncryption(FTPDataType *pFTPData)
+{
+	char Task[500];
+	int i, status;
+
+	if(!pFTPData || strlen(pFTPData->EncryptKey) <= 0)
+		return 0;
+
+	for(i = 0; i < pFTPData->FListSize; i++)
+	{
+		sprintf_s(Task, sizeof(Task), "gpg2.exe -se -r %s %s", pFTPData->EncryptKey, 
+				  pFTPData->FList[i].DataName);
+
+		status = system(Task);
+		if(status != 0)
+		{
+			printf("%d %d %s\n", status, errno, Task);
+			return 0;
+		}
+	}
+	
+	return 1;
+}
+
+int FTPSetup(FTPDataType *pFTPData, const char *CPName, const char *LocalDir)
+{
+	EXEC SQL BEGIN DECLARE SECTION;
+		VARCHAR ftp_name[21],
+			    ftp_site[61],
+			    ftp_user[21],
+		        ftp_pass[21],
+		        ftp_dir[61],
+		        ftp_key[31];
+		 short ftp_port, ind;
+	EXEC SQL END DECLARE SECTION;
+	
+	if(!CPName || strlen(CPName) == 0)
+		return 0;
+
+	pFTPData->FListSize = 0;
+	SaveCopy(pFTPData->CPName, sizeof(pFTPData->CPName), CPName, 0);
+	pFTPData->ScriptName[0] = 0; // if no ftp scrip name, will use default.
+	GetFileName(pFTPData->UtilName, sizeof(pFTPData->UtilName), "WINSCP", "WINSCP.EXE");
+	if(LocalDir && strlen(LocalDir) > 0)
+		SaveCopy(pFTPData->LocalDir, sizeof(pFTPData->LocalDir), LocalDir, 0);
+	else
+		pFTPData->LocalDir[0] = 0;
+	
+	SaveCopy(ftp_name.arr, sizeof(ftp_name.arr), CPName, 0);
+	ftp_name.len = strlen(ftp_name.arr);
+	ftp_port = 0;
+	
+	EXEC SQL WHENEVER SQLERROR GOTO Liblabel;
+	EXEC SQL SELECT FTP_SITE, FTP_USER, FTP_PASS, FTP_DIR, ENCRYPT_KEY, FTP_PORT 
+				INTO :ftp_site:ind, :ftp_user:ind, :ftp_pass:ind, :ftp_dir:ind, 
+				:ftp_key:ind, :ftp_port:ind FROM SEMAM.NW_FTP_INFO 
+				WHERE FTP_NAME = :ftp_name;
+
+	ftp_site.arr[ftp_site.len] = 0;
+	ftp_user.arr[ftp_user.len] = 0;
+	ftp_pass.arr[ftp_pass.len] = 0;
+	ftp_dir.arr[ftp_dir.len] = 0;
+	ftp_key.arr[ftp_key.len] = 0;
+	
+	SaveCopy(pFTPData->Site, sizeof(pFTPData->Site), ftp_site.arr, 0);
+	SaveCopy(pFTPData->User, sizeof(pFTPData->User), ftp_user.arr, 0);
+	SaveCopy(pFTPData->Pass, sizeof(pFTPData->Pass), ftp_pass.arr, 0);
+	SaveCopy(pFTPData->Dir, sizeof(pFTPData->Dir), ftp_dir.arr, 0);
+	SaveCopy(pFTPData->EncryptKey, sizeof(pFTPData->EncryptKey), ftp_key.arr, 0);
+	pFTPData->Port = ftp_port;
+
+	return 1;
+
+Liblabel:
+	SqlError("FTPSetup", 1);
+	return 0;
+}
+
+int FTPAddDataFile(FTPDataType *pFTPData, const char *DataName)
+{
+	if(!pFTPData || strlen(pFTPData->Site) <= 0 || pFTPData->FListSize >= FTPDataFileLimit) // Setup First
+		return 0;
+	
+	if(!DataName || strlen(DataName) <= 0)		 // Must have a valid Data File 
+		return 0;
+	
+	SaveCopy(pFTPData->FList[pFTPData->FListSize].DataName, 
+			sizeof(pFTPData->FList[pFTPData->FListSize].DataName), DataName, 0);
+
+	if(strlen(pFTPData->EncryptKey) > 0)
+	{
+		SaveCopy(pFTPData->FList[pFTPData->FListSize].GPGName, 
+				sizeof(pFTPData->FList[pFTPData->FListSize].GPGName), DataName, 0);
+		SaveConcatenate(pFTPData->FList[pFTPData->FListSize].GPGName,
+				sizeof(pFTPData->FList[pFTPData->FListSize].GPGName), ".GPG");
+	}
+	else
+		pFTPData->FList[pFTPData->FListSize].GPGName[0] = 0;
+	
+	pFTPData->FListSize ++;
+	
+	return pFTPData->FListSize;
+}
+
+int FTPGetScript(FTPDataType *pFTPData)
+{
+	int i;
+
+	if(!pFTPData || strlen(pFTPData->Site) <= 0 || !pFTPData->fp) // Setup first
+		return 0;
+
+	fprintf(pFTPData->fp, "option batch abort\n");
+	fprintf(pFTPData->fp, "option confirm off\n");
+	fprintf(pFTPData->fp, "open %s://%s:%s@%s -passive=on\n", 
+			pFTPData->Port == 21 ? "ftp" : "sftp", pFTPData->User, 
+			pFTPData->Pass, pFTPData->Site);
+	
+	if(strlen(pFTPData->Dir) > 0)
+		fprintf(pFTPData->fp, "cd %s\n", pFTPData->Dir);
+
+	for(i = 0; i < pFTPData->FListSize; i++)
+	{
+		fprintf(pFTPData->fp, "get %s ", 
+				strlen(pFTPData->EncryptKey) > 0 ? pFTPData->FList[i].GPGName : pFTPData->FList[i].DataName);
+
+		if(strlen(pFTPData->LocalDir) > 0)
+			fprintf(pFTPData->fp, " %s\\*.*\n", pFTPData->LocalDir);
+		else
+			fprintf(pFTPData->fp, " *.*\n");
+	}
+
+	fprintf(pFTPData->fp, "close\n");
+	fprintf(pFTPData->fp, "exit\n");
+	fclose(pFTPData->fp);
+
+	return 1;
+}
+
+int FTPPutScript(FTPDataType *pFTPData)
+{
+	int i;
+
+	if(!pFTPData || strlen(pFTPData->Site) <= 0 || !pFTPData->fp) // Setup First
+		return 0;
+
+	fprintf(pFTPData->fp, "option batch abort\n");
+	fprintf(pFTPData->fp, "option confirm off\n");
+	fprintf(pFTPData->fp, "open %s://%s:%s@%s -passive=on\n", 
+			pFTPData->Port == 21 ? "ftp" : "sftp", 
+			pFTPData->User, pFTPData->Pass, pFTPData->Site);
+	if(strlen(pFTPData->Dir) > 0)
+		fprintf(pFTPData->fp, "cd %s\n", pFTPData->Dir); 
+	
+	for(i = 0; i < pFTPData->FListSize; i++)
+	{
+		fprintf(pFTPData->fp, "put %s\n", 
+				strlen(pFTPData->EncryptKey) > 0 ? pFTPData->FList[i].GPGName : pFTPData->FList[i].DataName);
+	}
+
+	fprintf(pFTPData->fp, "close\n");
+	fprintf(pFTPData->fp, "exit\n");
+	fclose(pFTPData->fp);
+	
+	return 1;
+}
+
+int FTPRun(FTPDataType *pFTPData, int Upload)
+{
+	int status;
+	char Task[500];
+
+	if(!pFTPData || strlen(pFTPData->Site) <= 0)
+		return 0;
+
+	GetFileName(pFTPData->ScriptName, sizeof(pFTPData->ScriptName), "FMS_DATA", "ftp_script.txt");
+
+	fopen_s(&pFTPData->fp, pFTPData->ScriptName, "w+");
+	if(!pFTPData->fp)
+	{
+		printf("Fail to open %s\n", pFTPData->ScriptName);
+		return 0;
+	}
+
+	if(Upload)
+	{
+		if(strlen(pFTPData->EncryptKey) > 0)
+			FTPEncryption(pFTPData);
+		FTPPutScript(pFTPData);
+	}
+	else
+		FTPGetScript(pFTPData);
+
+	sprintf_s(Task, sizeof(Task), "START \"\" \"%s\" /script=\"%s\"\n", 
+				pFTPData->UtilName, pFTPData->ScriptName);
+
+	status = system(Task);
+	if(status != 0)
+		printf("%d %d %s\n", status, errno, Task);
+
+	if(!Upload && strlen(pFTPData->EncryptKey) > 0)
+		FTPDecryption(pFTPData);
+
+	return status;
+}
+
+int FTPEncrypt(FTPDataType *pFTPData)
+{
+	if(!pFTPData || strlen(pFTPData->Site) <= 0)
+		return 0;
+	
+	if(strlen(pFTPData->EncryptKey) > 0)
+		return FTPEncryption(pFTPData);
+		
+	return 0;
+}
+
+int FTPScript(FTPDataType *pFTPData, const char *ScriptName, const char *BatchName, int Upload)
+{
+	int i;
+	FILE *b_fp;
+
+	if(!pFTPData || strlen(pFTPData->Site) <= 0)
+		return 0;
+
+	if(!ScriptName || strlen(ScriptName) == 0)
+		return 0;
+	SaveCopy(pFTPData->ScriptName, sizeof(pFTPData->ScriptName), ScriptName, 0);
+	
+	if(!BatchName || strlen(BatchName) == 0)
+		return 0;
+	SaveCopy(pFTPData->BatchName, sizeof(pFTPData->BatchName), BatchName, 0);
+
+	fopen_s(&b_fp, pFTPData->BatchName, "w+");
+	if(!b_fp)
+	{
+		printf("Fail to open %s\n", pFTPData->BatchName);
+		return 0;
+	}
+	
+	fopen_s(&pFTPData->fp, pFTPData->ScriptName, "w+");
+	if(!pFTPData->fp)
+	{
+		printf("Fail to open %s\n", pFTPData->ScriptName);
+		return 0;
+	}
+
+	if(Upload)
+	{
+		if(strlen(pFTPData->EncryptKey) > 0)
+		{
+			for(i = 0; i < pFTPData->FListSize; i ++)
+				fprintf(b_fp, "gpg2.exe -se -r %s %s\n", pFTPData->EncryptKey, 
+						pFTPData->FList[i].DataName);
+		}
+
+		FTPPutScript(pFTPData);
+		fprintf(b_fp, "START \"\" \"%s\" /script=\"%s\"\n", pFTPData->UtilName, 
+				pFTPData->ScriptName);
+	}
+	else
+	{
+		FTPGetScript(pFTPData);
+		fprintf(b_fp, "START \"\" \"%s\" /script=\"%s\"\n", pFTPData->UtilName, 
+				pFTPData->ScriptName);
+		if(!Upload && strlen(pFTPData->EncryptKey) > 0)
+			for(i = 0; i < pFTPData->FListSize; i++)
+				fprintf(b_fp, "gpg.exe -d -o %s %s", pFTPData->FList[i].DataName, 
+						pFTPData->FList[i].GPGName);
+	}
+	
+	fclose(b_fp);
+
+	return 1;
+}
