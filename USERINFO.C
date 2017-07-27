@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <process.h>
 #include <string.h>
+#include <time.h>
+#include <assert.h>
 #include "userinfo.h"
 #include <stdlib.h>
 #include "asset.h"
@@ -229,6 +231,53 @@ void MMDDYYYYToDDMONYY(const char *SrcDate, char *Date)
 		sprintf_s(Date, 10, "%02d-%s-%02d", Day, Months[Month], Year % 100);
 }
 
+void MMDDYYYYToDDMONYYYY(const char *SrcDate, char *Date)
+{
+	char Buf[100], *Token, *p, *q;
+	char *Months[] = {"", "JAN", "FEB", "MAR", "APR", "MAY", "JUN", 
+					"JUL", "AUG", "SEP", "OCT", "NOV", "DEC"};
+	int i = 0, Day, Month, Year;
+
+	if(!SrcDate || strlen(SrcDate) == 0)
+		return;
+
+	SaveCopy(Buf, sizeof(Buf), SrcDate, 0);
+	
+	Date[0] = 0;
+
+	if(strstr(Buf, "/"))
+		Token = "/";
+	else
+		if(strstr(Buf, "-"))
+			Token = "-";
+		else
+			return;
+
+	p = strtok_s(Buf, Token, &q);
+	while(p)
+	{
+		switch(i)
+		{
+			case 0: // Month
+				Month = atoi(p);
+				break;
+			case 1: // Day
+				Day = atoi(p);
+				break;
+			case 2:
+				Year = atoi(p);
+				break;
+			default:
+				break;
+		}
+		i++;
+		p = strtok_s(NULL, Token, &q);
+	}
+
+	if(Day > 0 && Day <= 31 && Month > 0 && Month <= 12 && Year >= 0)
+		sprintf_s(Date, 12, "%02d-%s-%04d", Day, Months[Month], Year % 10000);
+}
+
 int ProcessInputInfoBase(int argc, char *argv[])
 // Support c:\Program
 //		   c:\Program user password
@@ -402,6 +451,9 @@ char *fgetline(char *buf, int max, FILE *fp)
 
 		if(c == 0) // replace ascii 0 with blank
 			c = ' ';
+		else
+			if(c == '\t')
+				c = ',';
 
 		*p++ = c;
 		i++;
@@ -416,3 +468,4 @@ char *fgetline(char *buf, int max, FILE *fp)
 
 	return (p);
 }
+

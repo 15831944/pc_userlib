@@ -12,6 +12,7 @@ int read_userinfo(char* username, char* password, char *db);
 int IsDateValid(const char* Date);
 void GenerateSelList(int Max, char *AvailList[], char *SelList, int sSize, int Start);
 void MMDDYYYYToDDMONYY(const char *SrcDate, char *Date);
+void MMDDYYYYToDDMONYYYY(const char *SrcDate, char *Date);
 const char *SaveCopy(char *DestStr, unsigned int DestStrSize, const char *SrcStr, int FailBlank);
 const char *SaveConcatenate(char *DestStr, unsigned int DestStrSize, const char *SrcStr);
 int ProcessInputInfoBase(int argc, char *argv[]);

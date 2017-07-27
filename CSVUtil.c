@@ -302,7 +302,7 @@ int CSVProcessData(CSVDataType *pCSVData, char *DataLine, int bHeader)
 				else
 				{
 					Data[j] = 0;
-
+					
 					if(bHeader)
 						CSVGetHeaderIndex(pCSVData, k, Data);
 					else
@@ -330,10 +330,42 @@ int CSVProcessData(CSVDataType *pCSVData, char *DataLine, int bHeader)
 	}
 
 	Data[j] = 0;
+
 	if(bHeader)
 		CSVGetHeaderIndex(pCSVData, k, Data);
 	else
 		CSVGetData(pCSVData, k, Data);
+
+	return 1;
+}
+
+int CSVProcessTabData(CSVDataType *pCSVData, char *DataLine, int bHeader)
+{
+	int i, k = 0;
+	char *p, *q;
+
+	if(!bHeader)
+	{
+		for(i = 0; i < pCSVData->nFieldCount; i ++)
+			pCSVData->CSVData[i].Data[0] = 0;
+
+		pCSVData->nRowCount++;
+	}
+
+	p = strtok_s(DataLine, "\t", &q);
+	while(q)
+	{
+		if(p && strlen(p) > 0) 
+		{
+			printf("%s\n", p);
+			if(bHeader)
+				CSVGetHeaderIndex(pCSVData, k, p);
+			else
+				CSVGetData(pCSVData, k, p);
+		}
+
+		p = strtok_s(NULL, "\t", &q);
+	}
 
 	return 1;
 }
@@ -383,7 +415,7 @@ int STPQuickProcessTagData(CSVDataType *pCSVData, char *DataLine)
 	{
 		for(i = 0; i < pCSVData->nFieldCount; i ++)
 		{
-			if(strncmp(p, pCSVData->CSVHeaders[i].Header, strlen(pCSVData->CSVHeaders[i].Header)) == 0)
+			if(strcmp(p, pCSVData->CSVHeaders[i].Header) == 0)
 				SaveCopy(pCSVData->CSVData[i].Data, sizeof(pCSVData->CSVData[i].Data), p + strlen(pCSVData->CSVHeaders[i].Header), 0);
 		}
 

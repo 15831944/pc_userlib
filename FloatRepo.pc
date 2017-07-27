@@ -1146,25 +1146,21 @@ void UpdateOptionPosition(const char *Date)
 	FloatRepoTo.len = strlen(FloatRepoTo.arr);
 	
 	EXEC SQL DELETE FROM SEMAM.NW_TEMP_OPTIONS;
-	EXEC SQL INSERT INTO SEMAM.NW_TEMP_OPTIONS (TRANS_NUM, PORTFOLIO, TICKET_NUM, 
-					TRADE_DATE, VALUE_DATE, TRANS_TYPE, TRANS_DIRECTION, NOM_AMOUNT, 
-					PRICE, ASSET_CODE, COUNTERPARTY, CON_CODE, OPTION_BACKING, 
-					EXERCISE_PRICE, EXERCISE_DATE, OPT_EXPIRATION, CURRENCY, 
-					FXRATE, BROKER, BR_FEES, LEV_RATE, DEAL_TYPE, TRADER_INI, 
-					CUSTODIAN, OPT_TICK, OPT_ID, EURO_OPT, OPT_AUTO, OPT_SET_CODE, 
-					OPT_SET_CODE2, SET_CONVENTION, DELIVERY_DATE, LISTED, CP_TRADE_ID, 
-					MARGIN, MARGIN_CURRENCY, MARGIN_AMOUNT, FX_DATE, BINARY, VAR, 
+	EXEC SQL INSERT INTO SEMAM.NW_TEMP_OPTIONS (TRANS_NUM, PORTFOLIO, TICKET_NUM, TRADE_DATE, VALUE_DATE, 
+					TRANS_TYPE, TRANS_DIRECTION, NOM_AMOUNT, PRICE, ASSET_CODE, COUNTERPARTY, CON_CODE, 
+					OPTION_BACKING, EXERCISE_PRICE, EXERCISE_DATE, OPT_EXPIRATION, CURRENCY, FXRATE, 
+					BROKER, BR_FEES, LEV_RATE, DEAL_TYPE, TRADER_INI, CUSTODIAN, OPT_TICK, OPT_ID, 
+					EURO_OPT, OPT_AUTO, OPT_SET_CODE, OPT_SET_CODE2, SET_CONVENTION, DELIVERY_DATE, 
+					LISTED, CP_TRADE_ID, MARGIN, MARGIN_CURRENCY, MARGIN_AMOUNT, FX_DATE, BINARY, VAR, 
 					SHORT_SALE, SEC_FEE, OR_FEE, HAN_DETAIL1, HAN_DETAIL2)
-			SELECT A.TRANS_NUM, A.PORTFOLIO, A.TICKET_NUM, A.TRADE_DATE, A.VALUE_DATE, 
-					A.TRANS_TYPE, A.TRANS_DIRECTION, A.NOM_AMOUNT - NVL(SUM(B.NOM_AMOUNT),0), 
-					A.PRICE, A.ASSET_CODE, A.COUNTERPARTY, A.CON_CODE, A.OPTION_BACKING, 
-					A.EXERCISE_PRICE, A.EXERCISE_DATE, A.OPT_EXPIRATION, A.CURRENCY, 
-					A.FXRATE, A.BROKER, A.BR_FEES, A.LEV_RATE, A.DEAL_TYPE, A.TRADER_INI, 
-					A.CUSTODIAN, A.OPT_TICK, A.OPT_ID, A.EURO_OPT, A.OPT_AUTO, 
-					A.OPT_SET_CODE, A.OPT_SET_CODE2, A.SET_CONVENTION, A.DELIVERY_DATE, 
-					A.LISTED, A.CP_TRADE_ID, A.MARGIN, A.MARGIN_CURRENCY, A.MARGIN_AMOUNT, 
-					A.FX_DATE, A.BINARY, A.VAR, A.SHORT_SALE, A.SEC_FEE, A.OR_FEE, 
-					A.HAN_DETAIL1, A.HAN_DETAIL2 
+			SELECT A.TRANS_NUM, A.PORTFOLIO, A.TICKET_NUM, A.TRADE_DATE, A.VALUE_DATE, A.TRANS_TYPE, 
+					A.TRANS_DIRECTION, A.NOM_AMOUNT - NVL(SUM(B.NOM_AMOUNT),0), A.PRICE, A.ASSET_CODE, 
+					A.COUNTERPARTY, A.CON_CODE, A.OPTION_BACKING, A.EXERCISE_PRICE, A.EXERCISE_DATE, 
+					A.OPT_EXPIRATION, A.CURRENCY, A.FXRATE, A.BROKER, A.BR_FEES, A.LEV_RATE, A.DEAL_TYPE, 
+					A.TRADER_INI, A.CUSTODIAN, A.OPT_TICK, A.OPT_ID, A.EURO_OPT, A.OPT_AUTO, A.OPT_SET_CODE, 
+					A.OPT_SET_CODE2, A.SET_CONVENTION, A.DELIVERY_DATE, A.LISTED, A.CP_TRADE_ID, A.MARGIN, 
+					A.MARGIN_CURRENCY, A.MARGIN_AMOUNT, A.FX_DATE, A.BINARY, A.VAR, A.SHORT_SALE, A.SEC_FEE, 
+					A.OR_FEE, A.HAN_DETAIL1, A.HAN_DETAIL2 
 					FROM SEMAM.NW_TR_TICKETS A, SEMAM.NW_TR_TICKETS B
 					WHERE A.TRANS_NUM = B.OPTION_BACKING(+)
 					AND B.TRADE_DATE(+) <= :FloatRepoTo
@@ -1173,14 +1169,13 @@ void UpdateOptionPosition(const char *Date)
 					AND LEAST(A.TRADE_DATE, A.VALUE_DATE) <= :FloatRepoTo 
 					AND (A.OPT_EXPIRATION IS NULL OR A.OPT_EXPIRATION > :FloatRepoTo)
 					AND (A.EXERCISE_DATE IS NULL OR A.EXERCISE_DATE > :FloatRepoTo)
-					GROUP BY A.TRANS_NUM, A.PORTFOLIO, A.TICKET_NUM, A.TRADE_DATE, A.VALUE_DATE, 
-					A.TRANS_TYPE, A.TRANS_DIRECTION, A.PRICE, A.ASSET_CODE, A.COUNTERPARTY, 
-					A.CON_CODE, A.OPTION_BACKING, A.EXERCISE_PRICE, A.EXERCISE_DATE, A.NOM_AMOUNT,
-					A.OPT_EXPIRATION, A.CURRENCY, A.FXRATE, A.BROKER, A.BR_FEES, A.LEV_RATE, 
-					A.DEAL_TYPE, A.TRADER_INI, A.CUSTODIAN, A.OPT_TICK, A.OPT_ID, A.EURO_OPT, 
-					A.OPT_AUTO, A.OPT_SET_CODE, A.OPT_SET_CODE2, A.SET_CONVENTION, A.DELIVERY_DATE, 
-					A.LISTED, A.CP_TRADE_ID, A.MARGIN, A.MARGIN_CURRENCY, A.MARGIN_AMOUNT, A.FX_DATE, 
-					A.BINARY, A.VAR, A.SHORT_SALE, A.SEC_FEE, A.OR_FEE, A.HAN_DETAIL1, A.HAN_DETAIL2 
+					GROUP BY A.TRANS_NUM, A.PORTFOLIO, A.TICKET_NUM, A.TRADE_DATE, A.VALUE_DATE, A.TRANS_TYPE, 
+					A.TRANS_DIRECTION, A.PRICE, A.ASSET_CODE, A.COUNTERPARTY, A.CON_CODE, A.OPTION_BACKING, 
+					A.EXERCISE_PRICE, A.EXERCISE_DATE, A.NOM_AMOUNT, A.OPT_EXPIRATION, A.CURRENCY, A.FXRATE, 
+					A.BROKER, A.BR_FEES, A.LEV_RATE, A.DEAL_TYPE, A.TRADER_INI, A.CUSTODIAN, A.OPT_TICK, 
+					A.OPT_ID, A.EURO_OPT, A.OPT_AUTO, A.OPT_SET_CODE, A.OPT_SET_CODE2, A.SET_CONVENTION, 
+					A.DELIVERY_DATE, A.LISTED, A.CP_TRADE_ID, A.MARGIN, A.MARGIN_CURRENCY, A.MARGIN_AMOUNT, 
+					A.FX_DATE, A.BINARY, A.VAR, A.SHORT_SALE, A.SEC_FEE, A.OR_FEE, A.HAN_DETAIL1, A.HAN_DETAIL2 
 					HAVING A.NOM_AMOUNT - NVL(SUM(B.NOM_AMOUNT),0) > 0;
 	return;
 
@@ -1377,23 +1372,110 @@ label1:
 
 /************************************************
 ************************************************/
-void GetFeeRates(double *Sec_Fee, double *Or_Fee)
+void GetSecFee(double *Sec_Fee)
 {
 	EXEC SQL BEGIN DECLARE SECTION;
-		double secfee, orfee;
+		double secfee;
 	EXEC SQL END DECLARE SECTION;
 
 	EXEC SQL SELECT SEC_FEE INTO :secfee FROM SEMAM.NW_SEC_FEE 
 				WHERE FROM_DATE <= TRUNC(SYSDATE) AND NVL(TO_DATE, SYSDATE) > TRUNC(SYSDATE);
 	
-	EXEC SQL SELECT OR_FEE INTO :orfee FROM SEMAM.NW_OR_FEE 
-				WHERE FROM_DATE <= TRUNC(SYSDATE) AND NVL(TO_DATE, SYSDATE) > TRUNC(SYSDATE);
-
 	*Sec_Fee = secfee;
-	*Or_Fee = orfee;
+
+	LoadOrFeeArray();
 	return;
 label1:
-	SqlError("GetFeeRates", 1);
+	SqlError("GetSecFee", 1);
+}
+/************************************************
+************************************************/
+void LoadOrFeeArray()
+{
+	EXEC SQL BEGIN DECLARE SECTION;
+	VARCHAR PB[21],
+			CP[21];
+	double LLimit, HLimit, or_fee, OCC_fee;
+	EXEC SQL END DECLARE SECTION;
+	int i = 0;
+
+
+	LLimit = -1000000;
+	HLimit = -1000000;
+	strcpy_s(FloatRepoSql.arr, sizeof(FloatRepoSql.arr), "SELECT PB_NAME, CP, LOW_LIMIT, HIGH_LIMIT, OR_FEE, OCC_FEE "
+				"FROM SEMAM.NW_OR_FEE WHERE FROM_DATE <= TRUNC(SYSDATE) AND NVL(TO_DATE, SYSDATE) > TRUNC(SYSDATE) ");
+	FloatRepoSql.len = strlen(FloatRepoSql.arr);
+	
+	EXEC SQL PREPARE SLoadOrFee FROM :FloatRepoSql;
+	EXEC SQL DECLARE CLoadOrFee CURSOR FOR SLoadOrFee;
+	EXEC SQL OPEN CLoadOrFee;
+
+	for(;;)
+	{
+		LLimit = -1000000;
+		HLimit = -1000000;
+		or_fee = 0;
+		OCC_fee = 0;
+		EXEC SQL FETCH CLoadOrFee INTO :PB:NULLIndicator, :CP:NULLIndicator, :LLimit:NULLIndicator, :HLimit:NULLIndicator, :or_fee:NULLIndicator, :OCC_fee:NULLIndicator;
+
+		if(sqlca.sqlcode == 1403)
+			break;		
+		PB.arr[PB.len] = 0;
+		CP.arr[CP.len] = 0;
+
+		strcpy_s(OrFeeDataArray[i].PB, sizeof(OrFeeDataArray[i].PB), PB.arr);
+		strcpy_s(OrFeeDataArray[i].CP, sizeof(OrFeeDataArray[i].CP), CP.arr);
+		OrFeeDataArray[i].LowLimit = LLimit;
+		OrFeeDataArray[i].HighLimit = HLimit;
+		OrFeeDataArray[i].OrFee = or_fee;
+		OrFeeDataArray[i].OCCFee = OCC_fee;
+
+		i ++;
+	}
+	
+	OrFeeDataArraySize = i;
+
+	return;
+label1:
+	SqlError("LoadOrFeeArray", 1);
+}
+/************************************************
+************************************************/
+int FindOrFeeData(const char *PB, const char *CP, double Contracts)
+{
+	int i, def_idx;
+
+	for(i = 0; i < OrFeeDataArraySize; i ++)
+	{
+		if(strlen(OrFeeDataArray[i].PB) == 0)
+			def_idx = i;
+	}
+
+	for(i = 0; i < OrFeeDataArraySize; i ++)
+	{
+		if(strlen(OrFeeDataArray[i].PB) > 0)
+		{
+			if(strcmp(OrFeeDataArray[i].PB, PB) == 0)
+			{
+				if(strlen(OrFeeDataArray[i].CP) > 0)
+				{
+					if(strcmp(OrFeeDataArray[i].CP, CP) == 0)
+						return i;
+				}
+				else
+					if(OrFeeDataArray[i].LowLimit >= 0)
+					{
+						if(Contracts > OrFeeDataArray[i].LowLimit && Contracts <= OrFeeDataArray[i].HighLimit)
+							return i;
+						else
+							if(Contracts > OrFeeDataArray[i].LowLimit)
+								return i;
+					}
+			}
+		}
+	}
+
+	return def_idx;
 }
 /************************************************
 ************************************************/
@@ -1403,6 +1485,18 @@ double ComputeSecFee(int bStock, char dir, double price, double nominal, double 
 		return round(price*nominal*sec_fee/1000000 + .0049, 2);
 	else
 		return 0;
+}
+/************************************************
+************************************************/
+double ComputeOrFee(const char *PB, const char *CP, double Contracts)
+{
+	int idx;
+
+	idx = FindOrFeeData(PB, CP, Contracts);
+	if(idx < 0)
+		return 0;
+
+	return round(Contracts*OrFeeDataArray[idx].OrFee + OrFeeDataArray[idx].OCCFee, 2);
 }
 /************************************************
 ************************************************/
