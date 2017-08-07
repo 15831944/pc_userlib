@@ -17,10 +17,25 @@ typedef struct {
 	char Phone[31];
 } PortfolioAccountType;
 
+typedef struct {
+	char PB[21];
+	char CP[21];
+	double LowLimit;
+	double HighLimit;
+	double OrFee;
+	double OCCFee;
+} OrFeeDataType;
+
+OrFeeDataType OrFeeDataArray[50];
+int OrFeeDataArraySize;
+
 char cf_date[11];
 
-void GetFeeRates(double *Sec_Fee, double *Or_Fee);
+void GetSecFee(double *Sec_Fee);
+int FindOrFeeData(const char *PB, const char *CP, double Contracts);
+void LoadOrFeeArray();
 double ComputeSecFee(int bStock, char dir, double price, double nominal, double sec_fee);
+double ComputeOrFee(const char *PB, const char *CP, double Contracts);
 void SetDateFormat();
 int CompareCFDate(char *Date, int status);
 void SetCFDate();
