@@ -1,0 +1,688 @@
+#include <stdio.h>
+#include <string.h>
+#include "GetUploadTrades.h"
+#include "floatrepo.h"
+#include "userinfo.h"
+
+EXEC SQL INCLUDE SQLCA;
+EXEC SQL INCLUDE oraca;
+EXEC ORACLE OPTION (ORACA=YES);
+
+void setupTradeUploadFundSql(const char *portlist, int bIn, char *FundSql, int nSqlSize);
+void getNewTickets(const char *date, const char *counterparty, const char *portlist, int bCP);
+void getModifyTickets(const char *date, const char *counterparty, const char *portlist, int bCP);
+void getDeleteTickets(const char *date, const char *counterparty, const char *portlist, int bCP);
+void clearSwapTicket();
+void fillSwapTicket();
+void fillNearSwapTicket();
+void toHistory();
+
+void setupTradeUploadFundSql(const char *portlist, int bIn, char *FundSql, int nSqlSize)
+{
+	if(!portlist || strlen(portlist) == 0)
+		FundSql[0];
+	else
+		if(bIn)
+			sprintf_s(FundSql, nSqlSize, "AND A.PORTFOLIO IN (%s) ", portlist);
+		else
+			sprintf_s(FundSql, nSqlSize, "AND A.PORTFOLIO NOT IN (%s) ", portlist);	
+}
+
+void getUploadMultiFundTrades(const char* date, const char *assign_cp, const char *portlist, int bIn)
+{
+	char FundSql[200];
+
+	// date and assign_cp or fund accountant must be valid 
+	if((!date || strlen(date) == 0) || (!assign_cp || strlen(assign_cp) == 0))
+		return;
+	
+	setupTradeUploadFundSql(portlist, bIn, FundSql, sizeof(FundSql));
+
+	toHistory();
+
+	getNewTickets(date, assign_cp, FundSql, 1);
+	getModifyTickets(date, assign_cp, FundSql, 1);
+	getDeleteTickets(date, assign_cp, FundSql, 1);
+	clearSwapTicket();
+
+	return;
+}
+
+void getAdminUploadTrades(const char* date, const char *assign_cp, const char *portlist, int bIn)
+{
+	char FundSql[200];
+
+	// date and assign_cp or fund accountant must be valid 
+	if((!date || strlen(date) == 0) || (!assign_cp || strlen(assign_cp) == 0))
+		return;
+
+	setupTradeUploadFundSql(portlist, bIn, FundSql, sizeof(FundSql));
+
+	toHistory();
+
+	getNewTickets(date, assign_cp, FundSql, 0);
+	getModifyTickets(date, assign_cp, FundSql, 0);
+	getDeleteTickets(date, assign_cp, FundSql, 0);
+	clearSwapTicket();
+
+	return;
+}
+
+void getUploadTrades(const char* date, const char *assign_cp)
+{
+	// date and assign_cp or fund accountant must be valid 
+	if((!date || strlen(date) == 0) || (!assign_cp || strlen(assign_cp) == 0))
+		return;
+
+	toHistory();
+
+	getNewTickets(date, assign_cp, "", 1);
+	getModifyTickets(date, assign_cp, "", 1);
+	getDeleteTickets(date, assign_cp, "", 1);
+	clearSwapTicket();
+
+	return;
+}
+
+void getNewTickets(const char *date, const char *assign_cp, const char *FundSql, int bCP)
+{
+	EXEC SQL BEGIN DECLARE SECTION;
+		VARCHAR GUT_sqlstat[10000],
+			GUT_assign_cp[21],
+			GUT_date[10],
+			GUT_ticket_num[11];
+		
+		long int GUT_trans_num, GUT_tmp_id;
+		short GUT_ind;
+	EXEC SQL END DECLARE SECTION;
+	
+
+	printf("\nFinding New Tickets");
+
+	SaveCopy(GUT_date.arr, sizeof(GUT_date.arr), date, 0);
+	SaveCopy(GUT_assign_cp.arr, sizeof(GUT_assign_cp.arr), assign_cp, 0);
+	GUT_date.len = strlen(GUT_date.arr);
+	GUT_assign_cp.len = strlen(GUT_assign_cp.arr);
+	
+	SaveCopy(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), 
+			"SELECT DISTINCT A.TRANS_NUM, A.TICKET_NUM, NVL(B.TRANS_NUM, NVL(C.TRANS_NUM, 0)) ", 0);
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "FROM SEMAM.V_TICKETS_INV A, SEMAM.NW_UPLOAD_PLAN B, "
+			"SEMAM.NW_UPLOAD_HIST C ");
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "WHERE B.TRANS_NUM(+) = A.TRANS_NUM "
+			"AND C.TRANS_NUM(+) = A.TRANS_NUM "
+			"AND A.TRADE_DATE = :d1 ");
+	if(bCP)
+		SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "AND A.PFU = 'P' "
+				"AND NVL(A.ASSIGN_CP, A.CUSTODIAN) = :d2 ");
+	else
+		SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "AND A.ACCOUNTANT = :d2 ");
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), FundSql);
+	GUT_sqlstat.len = strlen(GUT_sqlstat.arr);
+
+	EXEC SQL WHENEVER SQLERROR GOTO Liblabel;
+
+	EXEC SQL PREPARE GUP_S1 FROM :GUT_sqlstat;
+	EXEC SQL DECLARE GUP_C1 CURSOR FOR GUP_S1;
+	EXEC SQL OPEN GUP_C1 USING :GUT_date, :GUT_assign_cp;
+
+	for(;;)
+	{
+		GUT_trans_num = 0;
+
+		EXEC SQL FETCH GUP_C1 INTO :GUT_trans_num:GUT_ind, :GUT_ticket_num:GUT_ind, :GUT_tmp_id:GUT_ind;
+
+		if(sqlca.sqlcode == 1403)
+			break;
+
+		GUT_ticket_num.arr[GUT_ticket_num.len] = 0;
+		
+		if(GUT_tmp_id == 0)
+			EXEC SQL INSERT INTO SEMAM.NW_UPLOAD_PLAN (TRANS_NUM, TICKET_NUM, UPLOAD_TYPE, 
+							UPLOADED, COUNTERPARTY, UPLOAD_METHOD, DATE_STAMP, LATEST )
+							VALUES (:GUT_trans_num, :GUT_ticket_num, 'N', 'N', :GUT_assign_cp, 
+							'', SYSDATE, 'Y' );
+	}
+
+	clearSwapTicket();
+
+	EXEC SQL CLOSE GUP_C1;
+	return;
+
+Liblabel:
+	SqlError("getNewTickets", 1);
+	return;
+}
+
+void getModifyTickets(const char *date, const char *assign_cp, const char *FundSql, int bCP)
+{
+	EXEC SQL BEGIN DECLARE SECTION;
+		VARCHAR GUT_sqlstat[10000],
+		GUT_assign_cp[21],
+		GUT_date[10],
+		GUT_ticket_num[11];
+
+		long int GUT_trans_num;
+		short GUT_ind;	
+	EXEC SQL END DECLARE SECTION;
+
+	printf("\nFinding Modify Tickets");
+
+	SaveCopy(GUT_date.arr, sizeof(GUT_date.arr), date, 0);
+	SaveCopy(GUT_assign_cp.arr, sizeof(GUT_assign_cp.arr), assign_cp, 0);
+	GUT_date.len = strlen(GUT_date.arr);
+	GUT_assign_cp.len = strlen(GUT_assign_cp.arr);
+
+	// Ticket Change
+	SaveCopy(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "SELECT A.TRANS_NUM, A.TICKET_NUM ", 0);
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "FROM SEMAM.V_TICKETS_INV A, "
+		"SEMAM.V_TICKETS_HIST D, SEMAM.NW_UPLOAD_PLAN X ");
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "WHERE D.TRANS_NUM = A.TRANS_NUM "
+		"AND ((X.TRANS_NUM = A.TRANS_NUM "
+		"AND X.DATE_STAMP < A.DATE_STAMP "
+		"AND X.DATE_STAMP < D.CH_DATE "
+		"AND X.UPLOADED = 'Y' "
+		"AND X.LATEST = 'Y') OR (A.TRANS_NUM != A.WRK_TRANS_NUM)) "
+		"AND TRUNC(A.DATE_STAMP) = :d1 "
+		"AND (D.PORTFOLIO != A.PORTFOLIO OR "
+			"D.TRADE_DATE != A.TRADE_DATE OR "
+			"D.TRANS_TYPE != A.TRANS_TYPE OR "
+			"D.DIR != A.DIR OR "
+			"D.CURRENCY != A.CURRENCY OR "
+			"D.NOM_AMOUNT != A.NOM_AMOUNT OR "
+			"D.COUNTERPARTY != A.COUNTERPARTY OR "
+			"NVL(D.VALUE_DATE, '30-NOV-88') != NVL(A.VALUE_DATE, '30-NOV-88') OR "
+			"NVL(D.MATURITY_DATE, '30-NOV-88') != NVL(A.MATURITY_DATE, '30-NOV-88') OR "
+			"NVL(D.PRICE, 0) != NVL(A.PRICE, 0) OR "
+			"NVL(D.TR_RATE, 0) != NVL(A.TR_RATE, 0) OR "
+			"NVL(D.RATE_BASIS, 'X') != NVL(A.RATE_BASIS, 'X') OR "
+			"NVL(D.FLOAT_RATE_FORMULA, 'X') != NVL(A.FLOAT_RATE_FORMULA, 'X') OR "
+			"NVL(D.ASSET_CODE, 'X') != NVL(A.ASSET_CODE, 'X') OR "
+			"NVL(D.FXRATE, 0) != NVL(A.FXRATE, 0) OR "
+			"NVL(D.OPT_EXPIRATION, '30-NOV-88') != NVL(A.OPT_EXPIRATION, '30-NOV-88') OR "
+			"NVL(D.REPO_PRICE, 0) != NVL(A.REPO_PRICE, 0) OR "
+			"NVL(D.REPO_FXRATE, 0) != NVL(A.REPO_FXRATE, 0) OR "
+			"NVL(D.OPT_SET_CODE, 'X') != NVL(A.OPT_SET_CODE, 'X') OR "
+			"NVL(D.SWAP_TICKET, 'X') != NVL(A.SWAP_TICKET, 'X') OR "
+			"NVL(D.FX_DATE, '30-NOV-88') != NVL(A.FX_DATE, '30-NOV-88') OR "
+			"NVL(D.SEC_FEE, 'X') != NVL(A.SEC_FEE, 'X') OR "
+			"NVL(D.OR_FEE, 'X') != NVL(A.OR_FEE, 'X') OR "
+			"NVL(D.TRANS_SEQ, 0) != NVL(A.TRANS_SEQ, 0)) ");
+	if(bCP)
+		SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "AND A.PFU = 'P' "
+			"AND NVL(A.ASSIGN_CP, A.CUSTODIAN) = :d2 ");
+	else
+		SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "AND A.ACCOUNTANT = :d2 ");
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), FundSql); 
+
+	// TicketInv Change
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "UNION ");
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "SELECT A.TRANS_NUM, A.TICKET_NUM ");
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "FROM SEMAM.V_TICKETS_INV A, "
+			"SEMAM.V_TICKETS_INV_HIST D, SEMAM.NW_UPLOAD_PLAN X ");
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "WHERE D.INV_NUM = A.INV_NUM "
+			"AND X.TRANS_NUM = A.TRANS_NUM "
+			"AND X.DATE_STAMP < A.INV_DATE_STAMP "
+			"AND X.TRANS_NUM = D.TRANS_NUM "
+			"AND X.DATE_STAMP < D.INV_CH_DATE "
+			"AND X.UPLOADED = 'Y' "
+			"AND X.LATEST = 'Y' "
+			"AND TRUNC(A.INV_DATE_STAMP) = :d3 "
+			"AND (NVL(D.ACC_CODE, '9') != NVL(A.ACC_CODE, '9') OR "
+				"NVL(D.ACTUAL_VDATE, '30-NOV-88') != NVL(A.ACTUAL_VDATE, '30-NOV-88') OR "
+				"NVL(D.CURRENCY, '9') != NVL(A.CURRENCY, '9') OR "
+				"NVL(D.CROSS_RATE, 0) != NVL(A.CROSS_RATE, 0)) ");
+	if(bCP)
+		SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "AND A.PFU = 'P' "
+			"AND NVL(A.ASSIGN_CP, A.CUSTODIAN) = :d4 ");
+	else
+		SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "AND A.ACCOUNTANT = :d4 ");
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), FundSql); 
+
+	// Asset Change
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "UNION ");
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "SELECT A.TRANS_NUM, A.TICKET_NUM ");
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "FROM SEMAM.V_TICKETS_INV A, "
+		"SEMAM.NW_ASSETS B, SEMAM.NW_ASSETS_HIST D, SEMAM.NW_UPLOAD_PLAN X ");
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "WHERE B.ASS_CODE = A.ASSET_CODE "
+			"AND D.ASS_CODE = B.ASS_CODE "
+			"AND X.TRANS_NUM = A.TRANS_NUM "
+			"AND X.UPLOADED = 'Y' "
+			"AND X.LATEST = 'Y' "
+			"AND X.DATE_STAMP < B.DATE_STAMP "
+			"AND X.DATE_STAMP < D.CH_DATE "
+			"AND TRUNC(B.DATE_STAMP) = :d5 "
+			"AND (D.ASS_CURRENCY != B.ASS_CURRENCY OR "
+				  "D.ASS_ACCRUABLE != B.ASS_ACCRUABLE OR "
+				  "D.ASS_PPAID_INT != B.ASS_PPAID_INT OR "
+				  "NVL(D.ASS_CURRENCY2, 'X') != NVL(B.ASS_CURRENCY2, 'X') OR " 
+				  "NVL(D.ASS_INT_TYPE, 'X') != NVL(B.ASS_INT_TYPE, 'X') OR "
+				  "NVL(D.ASS_RATE_BASIS, 'X') != NVL(B.ASS_RATE_BASIS, 'X') OR "
+				  "NVL(D.ASS_COUPON_START_DATE, '30-NOV-88') != NVL(B.ASS_COUPON_START_DATE, '30-NOV-88') OR "
+				  "NVL(D.ASS_BEGIN_ROLL_DATE, '30-NOV-88') != NVL(B.ASS_BEGIN_ROLL_DATE, '30-NOV-88') OR "
+				  "NVL(D.ASS_MATURITY_DATE, '30-NOV-88') != NVL(B.ASS_MATURITY_DATE, '30-NOV-88') OR "
+				  "NVL(D.ASS_FX_DATE, '30-NOV-88') != NVL(B.ASS_FX_DATE, '30-NOV-88')) ");
+	if(bCP)
+		SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "AND A.PFU = 'P' "
+				"AND NVL(A.ASSIGN_CP, A.CUSTODIAN) = :d6 ");
+	else
+		SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "AND A.ACCOUNTANT = :d6 ");
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), FundSql); 
+
+	// Rate change
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "UNION ");
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "SELECT A.TRANS_NUM, A.TICKET_NUM ");
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "FROM SEMAM.V_TICKETS_INV A, "
+		"SEMAM.NW_ASS_PERIODS B, SEMAM.NW_ASS_PERIODS_HIST D, SEMAM.NW_UPLOAD_PLAN X ");
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "WHERE B.ASS_CODE = A.ASSET_CODE "
+			"AND B.ASS_FROM <= A.VALUE_DATE "
+			"AND B.ASS_TO > A.VALUE_DATE "
+			"AND D.ASS_CODE = A.ASSET_CODE "
+			"AND D.ASS_FROM <= A.VALUE_DATE "
+			"AND D.ASS_TO > A.VALUE_DATE "
+			"AND X.TRANS_NUM = A.TRANS_NUM "
+			"AND X.UPLOADED = 'Y' "
+			"AND X.LATEST = 'Y' "
+			"AND X.DATE_STAMP < B.DATE_STAMP "
+			"AND X.DATE_STAMP < D.CH_DATE "
+			"AND TRUNC(B.DATE_STAMP) = :d7 "
+			"AND (D.ASS_CODE != B.ASS_CODE OR "
+				"D.ASS_FROM != B.ASS_FROM OR "
+				"NVL(D.ASS_TO, '30-NOV-88') != NVL(B.ASS_TO, '30-NOV-88') OR "
+				"NVL(D.RATE, 0) != NVL(B.RATE, 0) OR "
+				"NVL(D.AMORT_FACT, 1) != NVL(B.AMORT_FACT, 1) OR "
+				"NVL(D.CAPIT_RATE, 0) != NVL(B.CAPIT_RATE, 0) OR "
+				"NVL(D.PLUS_AMOUNT, 0) != NVL(B.PLUS_AMOUNT, 0) OR "
+				"NVL(D.ACTION, 'X') != NVL(B.ACTION, 'X')) ");
+	if(bCP)
+		SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "AND A.PFU = 'P' "
+				"AND NVL(A.ASSIGN_CP, A.CUSTODIAN) = :d8 ");
+	else
+		SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "AND A.ACCOUNTANT = :d8 ");
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), FundSql); 
+
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "UNION ");
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "SELECT A.TRANS_NUM, A.TICKET_NUM ");
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "FROM SEMAM.V_TICKETS_INV A, "
+		"SEMAM.V_TICKETS_HIST D, SEMAM.NW_UPLOAD_HIST X ");
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "WHERE D.TRANS_NUM = A.TRANS_NUM "
+		"AND X.TRANS_NUM = A.TRANS_NUM "
+		"AND X.DATE_STAMP < A.DATE_STAMP "
+		"AND X.TRANS_NUM = D.TRANS_NUM "
+		"AND X.DATE_STAMP < D.CH_DATE "
+		"AND TRUNC(A.DATE_STAMP) = :d9 "
+		"AND (D.PORTFOLIO != A.PORTFOLIO OR "
+			 "D.TRADE_DATE != A.TRADE_DATE OR "
+			 "D.TRANS_TYPE != A.TRANS_TYPE OR "
+			 "D.DIR != A.DIR OR "
+			 "D.CURRENCY != A.CURRENCY OR "
+			 "D.NOM_AMOUNT != A.NOM_AMOUNT OR "
+			 "D.COUNTERPARTY != A.COUNTERPARTY OR "
+			 "NVL(D.VALUE_DATE, '30-NOV-88') != NVL(A.VALUE_DATE, '30-NOV-88') OR "
+			 "NVL(D.MATURITY_DATE, '30-NOV-88') != NVL(A.MATURITY_DATE, '30-NOV-88') OR "
+			 "NVL(D.PRICE, 0) != NVL(A.PRICE, 0) OR "
+			 "NVL(D.TR_RATE, 0) != NVL(A.TR_RATE, 0) OR "
+			 "NVL(D.RATE_BASIS, 'X') != NVL(A.RATE_BASIS, 'X') OR "
+			 "NVL(D.FLOAT_RATE_FORMULA, 'X') != NVL(A.FLOAT_RATE_FORMULA, 'X') OR "
+			 "NVL(D.ASSET_CODE, 'X') != NVL(A.ASSET_CODE, 'X') OR "
+			 "NVL(D.FXRATE, 0) != NVL(A.FXRATE, 0) OR "
+			 "NVL(D.OPT_EXPIRATION, '30-NOV-88') != NVL(A.OPT_EXPIRATION, '30-NOV-88') OR "
+			 "NVL(D.REPO_PRICE, 0) != NVL(A.REPO_PRICE, 0) OR "
+			 "NVL(D.REPO_FXRATE, 0) != NVL(A.REPO_FXRATE, 0) OR "
+			 "NVL(D.OPT_SET_CODE, 'X') != NVL(A.OPT_SET_CODE, 'X') OR "
+			 "NVL(D.SWAP_TICKET, 'X') != NVL(A.SWAP_TICKET, 'X') OR "
+			 "NVL(D.FX_DATE, '30-NOV-88') != NVL(A.FX_DATE, '30-NOV-88') OR "
+			 "NVL(D.SEC_FEE, 'X') != NVL(A.SEC_FEE, 'X') OR "
+			 "NVL(D.OR_FEE, 'X') != NVL(A.OR_FEE, 'X') OR "
+			 "NVL(D.TRANS_SEQ, 0) != NVL(A.TRANS_SEQ, 0)) ");
+	if(bCP)
+		SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "AND A.PFU = 'P' "
+			"AND NVL(A.ASSIGN_CP, A.CUSTODIAN) = :d10 ");
+	else
+		SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "AND A.ACCOUNTANT = :d10 ");
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), FundSql); 
+
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "UNION ");
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "SELECT A.TRANS_NUM, A.TICKET_NUM ");
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "FROM SEMAM.V_TICKETS_INV A, "
+		"SEMAM.V_TICKETS_INV_HIST D, SEMAM.NW_UPLOAD_HIST X ");
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "WHERE D.INV_NUM = A.INV_NUM "
+		"AND X.TRANS_NUM = A.TRANS_NUM "
+		"AND X.DATE_STAMP < A.INV_DATE_STAMP "
+		"AND X.DATE_STAMP < D.INV_CH_DATE "
+		"AND TRUNC(A.INV_DATE_STAMP) = :d11 "
+		"AND (NVL(D.ACC_CODE, '9') != NVL(A.ACC_CODE, '9') OR "
+			"NVL(D.ACTUAL_VDATE, '30-NOV-88') != NVL(A.ACTUAL_VDATE, '30-NOV-88') OR "
+			"NVL(D.CURRENCY, '9') != NVL(A.CURRENCY, '9') OR "
+			"NVL(D.CROSS_RATE, 0) != NVL(A.CROSS_RATE, 0)) ");
+	if(bCP)
+		SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "AND A.PFU = 'P' "
+			"AND NVL(A.ASSIGN_CP, A.CUSTODIAN) = :d12 ");
+	else
+		SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "AND A.ACCOUNTANT = :d12 ");
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), FundSql); 
+
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "UNION ");
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "SELECT A.TRANS_NUM, A.TICKET_NUM ");
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "FROM SEMAM.V_TICKETS_INV A, "
+		"SEMAM.NW_ASSETS B, SEMAM.NW_ASSETS_HIST D, SEMAM.NW_UPLOAD_HIST X ");
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "WHERE B.ASS_CODE = A.ASSET_CODE "
+		"AND D.ASS_CODE = A.ASSET_CODE "
+		"AND X.TRANS_NUM = A.TRANS_NUM "
+		"AND X.DATE_STAMP < B.DATE_STAMP "
+		"AND X.DATE_STAMP < D.CH_DATE "
+		"AND TRUNC(B.DATE_STAMP) = :d13 "
+		"AND (D.ASS_CURRENCY != B.ASS_CURRENCY OR "
+			  "D.ASS_ACCRUABLE != B.ASS_ACCRUABLE OR "
+			  "D.ASS_PPAID_INT != B.ASS_PPAID_INT OR "
+			  "NVL(D.ASS_CURRENCY2, 'X') != NVL(B.ASS_CURRENCY2, 'X') OR " 
+			  "NVL(D.ASS_INT_TYPE, 'X') != NVL(B.ASS_INT_TYPE, 'X') OR "
+			  "NVL(D.ASS_RATE_BASIS, 'X') != NVL(B.ASS_RATE_BASIS, 'X') OR "
+			  "NVL(D.ASS_COUPON_START_DATE, '30-NOV-88') != NVL(B.ASS_COUPON_START_DATE, '30-NOV-88') OR "
+			  "NVL(D.ASS_BEGIN_ROLL_DATE, '30-NOV-88') != NVL(B.ASS_BEGIN_ROLL_DATE, '30-NOV-88') OR "
+			  "NVL(D.ASS_MATURITY_DATE, '30-NOV-88') != NVL(B.ASS_MATURITY_DATE, '30-NOV-88') OR "
+			  "NVL(D.ASS_FX_DATE, '30-NOV-88') != NVL(B.ASS_FX_DATE, '30-NOV-88')) ");
+	if(bCP)
+		SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "AND A.PFU = 'P' "
+				"AND NVL(A.ASSIGN_CP, A.CUSTODIAN) = :d14 ");
+	else
+		SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "AND A.ACCOUNTANT = :d14 ");
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), FundSql); 
+
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "UNION ");
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "SELECT A.TRANS_NUM, A.TICKET_NUM ");
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "FROM SEMAM.V_TICKETS_INV A, "
+		"SEMAM.NW_ASS_PERIODS B, SEMAM.NW_ASS_PERIODS_HIST D, SEMAM.NW_UPLOAD_HIST X ");
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "WHERE B.ASS_CODE = A.ASSET_CODE "
+		"AND B.ASS_FROM <= A.VALUE_DATE "
+		"AND B.ASS_TO > A.VALUE_DATE "
+		"AND D.ASS_CODE = A.ASSET_CODE "
+		"AND D.ASS_FROM <= A.VALUE_DATE "
+		"AND D.ASS_TO > A.VALUE_DATE "
+		"AND X.TRANS_NUM = A.TRANS_NUM "
+		"AND X.DATE_STAMP < B.DATE_STAMP "
+		"AND X.DATE_STAMP < D.CH_DATE "
+		"AND TRUNC(B.DATE_STAMP) = :d15 "
+		"AND (D.ASS_CODE = B.ASS_CODE OR "
+			  "D.ASS_FROM != B.ASS_FROM OR "
+			  "NVL(D.ASS_TO, '30-NOV-88') != NVL(B.ASS_TO, '30-NOV-88') OR "
+			  "NVL(D.RATE, 0) != NVL(B.RATE, 0) OR "
+			  "NVL(D.AMORT_FACT, 1) != NVL(B.AMORT_FACT, 1) OR "
+			  "NVL(D.CAPIT_RATE, 0) != NVL(B.CAPIT_RATE, 0) OR "
+			  "NVL(D.PLUS_AMOUNT, 0) != NVL(B.PLUS_AMOUNT, 0) OR "
+			  "NVL(D.ACTION, 'X') != NVL(B.ACTION, 'X')) ");
+	if(bCP)
+		SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "AND A.PFU = 'P' "
+				"AND NVL(A.ASSIGN_CP, A.CUSTODIAN) = :d16 ");
+	else
+		SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "AND A.ACCOUNTANT = :d16 ");
+
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), FundSql); 
+
+	GUT_sqlstat.len = strlen(GUT_sqlstat.arr);
+
+	EXEC SQL PREPARE GUT_S2 FROM :GUT_sqlstat;
+	EXEC SQL DECLARE GUT_C2 CURSOR FOR GUT_S2;
+	EXEC SQL OPEN GUT_C2 using :GUT_date, :GUT_assign_cp, :GUT_date, :GUT_assign_cp, :GUT_date, :GUT_assign_cp, 
+								:GUT_date, :GUT_assign_cp, :GUT_date, :GUT_assign_cp, :GUT_date, :GUT_assign_cp,
+								:GUT_date, :GUT_assign_cp, :GUT_date, :GUT_assign_cp;
+
+	for(;;)
+	{
+
+		GUT_trans_num = 0;
+
+		EXEC SQL FETCH GUT_C2 INTO :GUT_trans_num:GUT_ind, :GUT_ticket_num:GUT_ind; 
+
+		if(sqlca.sqlcode == 1403)
+			break;
+
+		GUT_ticket_num.arr[GUT_ticket_num.len] = 0;
+
+		EXEC SQL UPDATE SEMAM.NW_UPLOAD_PLAN SET LATEST = 'N' WHERE TRANS_NUM = :GUT_trans_num;
+
+		EXEC SQL INSERT INTO SEMAM.NW_UPLOAD_PLAN (TRANS_NUM, TICKET_NUM, UPLOAD_TYPE, 
+						UPLOADED, COUNTERPARTY, UPLOAD_METHOD, DATE_STAMP, LATEST )
+						VALUES (:GUT_trans_num, :GUT_ticket_num, 'M', 'N', :GUT_assign_cp, 
+						'', SYSDATE, 'Y' );
+	}
+	EXEC SQL CLOSE GUT_C2;
+	
+	//find modify info in assets
+
+	fillSwapTicket();
+	clearSwapTicket();
+
+	return;
+
+Liblabel:
+	SqlError("getModifyTickets", 1);
+	return;
+
+}
+
+void getDeleteTickets(const char *date, const char *assign_cp, const char *FundSql, int bCP)
+{
+	EXEC SQL BEGIN DECLARE SECTION;
+		VARCHAR GUT_sqlstat[10000],
+		GUT_assign_cp[21],
+		GUT_date[10],
+		GUT_ticket_num[11];
+		
+		long int GUT_trans_num, GUT_tmp_id;
+		short GUT_ind;
+	EXEC SQL END DECLARE SECTION;
+
+	printf("\nFinding Deleted Tickets");
+	
+	SaveCopy(GUT_date.arr, sizeof(GUT_date.arr), date, 0);
+	SaveCopy(GUT_assign_cp.arr, sizeof(GUT_assign_cp.arr), assign_cp, 0);
+	GUT_date.len = strlen(GUT_date.arr);
+	GUT_assign_cp.len = strlen(GUT_assign_cp.arr);
+	
+	SaveCopy(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "SELECT A.TRANS_NUM, A.TICKET_NUM, NVL(C.TRANS_NUM, 0) "
+			"FROM SEMAM.V_TICKETS_INV_HIST A, SEMAM.NW_DELETE_TICKETS B, SEMAM.NW_UPLOAD_PLAN C "
+			"WHERE B.TRANS_NUM = A.TRANS_NUM "
+			"AND B.VERSION = A.TR_VERSION "
+			"AND C.TRANS_NUM(+) = B.TRANS_NUM "
+			"AND C.UPLOADED(+) = 'Y' "
+			"AND C.UPLOAD_TYPE(+) = 'D' "
+			"AND TRUNC(A.DATE_STAMP) = :d1 ", 0);
+	if(bCP)
+		SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "AND A.PFU = 'P' "
+				"AND NVL(A.ASSIGN_CP, A.CUSTODIAN) = :d2 ");
+	else
+		SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "AND A.ACCOUNTANT = :d2 ");
+
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), FundSql); 
+	
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "UNION "
+			"SELECT A.TRANS_NUM, A.TICKET_NUM, NVL(C.TRANS_NUM, 0) "
+			"FROM SEMAM.V_TICKETS_INV_HIST A, SEMAM.NW_DELETE_TICKETS B, SEMAM.NW_UPLOAD_PLAN C, "
+			"SEMAM.NW_UPLOAD_HIST D "
+			"WHERE B.TRANS_NUM = A.TRANS_NUM "
+			"AND B.VERSION = A.TR_VERSION "
+			"AND C.TRANS_NUM(+) = B.TRANS_NUM "
+			"AND C.UPLOAD_TYPE(+) = 'D' "
+			"AND D.TRANS_NUM = B.TRANS_NUM "
+			"AND TRUNC(A.DATE_STAMP) = :d3 ");
+	if(bCP)
+		SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "AND A.PFU = 'P' "
+				"AND NVL(A.ASSIGN_CP, A.CUSTODIAN) = :d4 ");
+	else
+		SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), "AND A.ACCOUNTANT = :d4 ");
+	
+	SaveConcatenate(GUT_sqlstat.arr, sizeof(GUT_sqlstat.arr), FundSql); 
+			
+	GUT_sqlstat.len = strlen(GUT_sqlstat.arr);
+
+	EXEC SQL PREPARE GUP_S4 FROM :GUT_sqlstat;
+	EXEC SQL DECLARE GUP_C4 CURSOR FOR GUP_S4;
+	EXEC SQL OPEN GUP_C4 USING :GUT_date, :GUT_assign_cp, :GUT_date, :GUT_assign_cp;
+
+	for(;;)
+	{
+		GUT_trans_num = 0;
+
+		EXEC SQL FETCH GUP_C4 INTO :GUT_trans_num:GUT_ind, :GUT_ticket_num:GUT_ind, :GUT_tmp_id:GUT_ind;
+
+		if(sqlca.sqlcode == 1403)
+			break;
+
+		GUT_ticket_num.arr[GUT_ticket_num.len] = 0;
+		
+		if(GUT_tmp_id == 0)
+		{
+			EXEC SQL DELETE FROM SEMAM.NW_UPLOAD_PLAN WHERE TRANS_NUM = :GUT_trans_num 
+								AND UPLOADED = 'N';
+
+			EXEC SQL INSERT INTO SEMAM.NW_UPLOAD_PLAN (TRANS_NUM, TICKET_NUM, UPLOAD_TYPE, 
+								UPLOADED, COUNTERPARTY, UPLOAD_METHOD, DATE_STAMP, LATEST )
+								VALUES (:GUT_trans_num, :GUT_ticket_num, 'D', 'N', 
+										:GUT_assign_cp, NULL, SYSDATE, 'N' );
+		}
+	}
+
+	clearSwapTicket();
+
+	EXEC SQL CLOSE GUP_C4;
+	return;
+
+Liblabel:
+	SqlError("getNewTickets", 1);
+	return;
+}
+
+void fillSwapTicket()
+{
+//find far leg ticket for modified near leg ticket
+	EXEC SQL INSERT INTO SEMAM.NW_UPLOAD_PLAN 
+			( TRANS_NUM, TICKET_NUM, UPLOAD_TYPE, UPLOADED, COUNTERPARTY, UPLOAD_METHOD, DATE_STAMP, LATEST ) 
+			SELECT A.TRANS_NUM, A.TICKET_NUM, 'M', 'N', B.COUNTERPARTY, B.UPLOAD_METHOD, SYSDATE, B.LATEST 
+			FROM SEMAM.V_TICKETS A, SEMAM.NW_UPLOAD_PLAN B 
+			WHERE A.SWAP_TICKET = B.TICKET_NUM 
+			AND B.UPLOAD_TYPE = 'M';
+
+	return;
+
+Liblabel:
+	SqlError("fillSwapTicket", 1);
+	return;
+}
+
+void fillNearSwapTicket()
+{
+//find near leg ticket for modified near leg ticket
+	EXEC SQL INSERT INTO SEMAM.NW_UPLOAD_PLAN 
+			( TRANS_NUM, TICKET_NUM, UPLOAD_TYPE, UPLOADED, COUNTERPARTY, UPLOAD_METHOD, DATE_STAMP, LATEST ) 
+			SELECT C.TRANS_NUM, C.TICKET_NUM, 'N', 'Y', B.COUNTERPARTY, B.UPLOAD_METHOD, B.DATE_STAMP, B.LATEST 
+			FROM SEMAM.V_TICKETS A, SEMAM.V_TICKETS C, SEMAM.NW_UPLOAD_PLAN B 
+			WHERE A.TRANS_NUM = B.TRANS_NUM 
+			AND A.SWAP_TICKET IS NOT NULL 
+			AND C.TICKET_NUM = A.SWAP_TICKET 
+			AND C.PORTFOLIO = A.PORTFOLIO;
+	return;
+
+Liblabel:
+	SqlError("fillNearSwapTicket", 1);
+	return;
+}
+
+void clearSwapTicket()
+{
+	EXEC SQL DELETE FROM SEMAM.NW_UPLOAD_PLAN WHERE TICKET_NUM IN ( 
+		SELECT SWAP_TICKET FROM SEMAM.V_TICKETS A, SEMAM.NW_UPLOAD_PLAN B 
+		WHERE SWAP_TICKET IS NOT NULL 
+		AND A.TRANS_NUM = B.TRANS_NUM );
+
+	return;
+
+Liblabel:
+	SqlError("clearSwapTicket", 1);
+	return;
+}
+
+void toHistory()
+{
+
+	fillNearSwapTicket();
+
+	//remove duplicates, not sure where duplicates are from
+	EXEC SQL DELETE FROM SEMAM.NW_UPLOAD_PLAN A
+		WHERE A.LATEST = 'Y' AND A.ROWID > ANY (
+			SELECT B.rowid FROM SEMAM.NW_UPLOAD_PLAN B
+			WHERE A.TRANS_NUM = B.TRANS_NUM AND B.LATEST = 'Y');
+
+	EXEC SQL DELETE FROM SEMAM.NW_UPLOAD_HIST WHERE TRANS_NUM IN 
+			(SELECT TRANS_NUM 
+			FROM SEMAM.NW_UPLOAD_PLAN 
+			WHERE TRUNC( DATE_STAMP ) < TRUNC( SYSDATE ) 
+			AND LATEST = 'Y');
+
+	EXEC SQL INSERT INTO SEMAM.NW_UPLOAD_HIST ( TRANS_NUM, TICKET_NUM, DATE_STAMP ) 
+			SELECT TRANS_NUM, TICKET_NUM, DATE_STAMP 
+			FROM SEMAM.NW_UPLOAD_PLAN 
+			WHERE TRUNC( DATE_STAMP ) < TRUNC( SYSDATE ) 
+			AND UPLOAD_TYPE != 'D' 
+			AND LATEST = 'Y';
+	
+	EXEC SQL DELETE FROM SEMAM.NW_UPLOAD_HIST WHERE TRANS_NUM IN
+			(SELECT A.TRANS_NUM
+			FROM SEMAM.NW_UPLOAD_PLAN A, SEMAM.NW_TR_TICKETS B
+			WHERE TRUNC( A.DATE_STAMP ) = TRUNC( SYSDATE ) 
+			AND A.UPLOAD_TYPE = 'M' 
+			AND A.TRANS_NUM = B.TRANS_NUM
+			AND B.TRADE_DATE < TRUNC( SYSDATE )
+			AND LATEST = 'Y');
+
+	EXEC SQL INSERT INTO SEMAM.NW_UPLOAD_HIST ( TRANS_NUM, TICKET_NUM, DATE_STAMP ) 
+			SELECT A.TRANS_NUM, A.TICKET_NUM, A.DATE_STAMP 
+			FROM SEMAM.NW_UPLOAD_PLAN A, SEMAM.NW_TR_TICKETS B
+			WHERE TRUNC( A.DATE_STAMP ) = TRUNC( SYSDATE ) 
+			AND A.UPLOAD_TYPE = 'M' 
+			AND A.TRANS_NUM = B.TRANS_NUM
+			AND B.TRADE_DATE < TRUNC( SYSDATE )
+			AND LATEST = 'Y';
+
+	EXEC SQL DELETE FROM SEMAM.NW_UPLOAD_PLAN WHERE TRUNC(DATE_STAMP) < TRUNC(SYSDATE);
+
+	return;
+
+Liblabel:
+	SqlError("toHistory", 1);
+	return;
+}
+
+void markUploaded(const char* ticket_num)
+{
+
+	EXEC SQL BEGIN DECLARE SECTION;
+		VARCHAR GUT_ticket_num[11];
+	EXEC SQL END DECLARE SECTION;
+
+	SaveCopy(GUT_ticket_num.arr, sizeof(GUT_ticket_num.arr), ticket_num, 0);
+	GUT_ticket_num.len = strlen(GUT_ticket_num.arr);
+	EXEC SQL UPDATE SEMAM.NW_UPLOAD_PLAN SET UPLOADED = 'Y' WHERE TICKET_NUM = :GUT_ticket_num;
+
+	return;
+
+Liblabel:
+	SqlError("markUploaded", 1);
+	return;
+}
+
+void markUploadedbyTransNum(int trans_num)
+{
+
+	EXEC SQL BEGIN DECLARE SECTION;
+		int GUT_trans_num;
+	EXEC SQL END DECLARE SECTION;
+
+	GUT_trans_num = trans_num;
+	EXEC SQL UPDATE SEMAM.NW_UPLOAD_PLAN SET UPLOADED = 'Y' WHERE TRANS_NUM = :GUT_trans_num;
+
+	return;
+
+Liblabel:
+	SqlError("markUploadedbyTransNum", 1);
+	return;
+}
