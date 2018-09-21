@@ -282,15 +282,26 @@ void CostAvCostPL(CostType *CostRes, CostDataType *CostData, double NomAmount)
 	}
 	else
 	{
-		Profit = NomAmount*(CostData->Price - CostRes->AvPrice)*CostRes->nRunDir*
-							CostRes->Amort*CostRes->BondFact/CostData->Fxrate;
-		CostRes->Profit += Profit;
-
-		if(CostRes->Future == 'F') /* Future */
-			CostRes->FProfit += Profit;
+		if(CostRes->InfBond)
+		{
+			Profit = NomAmount*(CostData->Price*CostData->Amort - CostRes->AvPrice * CostRes->Amort)*
+								CostRes->nRunDir*CostRes->BondFact/CostData->Fxrate;
+			CostRes->Profit += Profit;
+			CostRes->FProfit += NomAmount*(CostData->USDPrice*CostData->Amort - CostRes->AvUSDPrice*CostRes->Amort)*
+								CostRes->nRunDir*CostRes->BondFact;
+		}
 		else
-			CostRes->FProfit += NomAmount*(CostData->USDPrice - CostRes->AvUSDPrice)*
-								CostRes->nRunDir*CostRes->Amort*CostRes->BondFact;
+		{
+			Profit = NomAmount*(CostData->Price - CostRes->AvPrice)*CostRes->nRunDir*
+								CostRes->Amort*CostRes->BondFact/CostData->Fxrate;
+			CostRes->Profit += Profit;
+
+			if(CostRes->Future == 'F') /* Future */
+				CostRes->FProfit += Profit;
+			else
+				CostRes->FProfit += NomAmount*(CostData->USDPrice - CostRes->AvUSDPrice)*
+									CostRes->nRunDir*CostRes->Amort*CostRes->BondFact;
+		}
 	}
 }
 /*****************************************
@@ -382,50 +393,47 @@ void CostAvCostMethod(CostType *CostRes, CostDataType *CostData)
 		return;
 	}
 
-	if((CostRes->Amort != CostData->Amort) && CostRes->NomAmount != 0)
+	if(!CostRes->InfBond)
 	{
-		if(CostRes->Amort > CostData->Amort)
+		if((CostRes->Amort != CostData->Amort) && CostRes->NomAmount != 0)
 		{
-			if(CostRes->Future == 'F')
+			if(CostRes->Amort > CostData->Amort)
 			{
-				CostRes->FProfit = CostRes->nRunDir*CostRes->NomAmount*CostRes->BondFact*
-									(CostRes->Amort - CostData->Amort)*
-									(100 - CostRes->AvPrice)/CostData->Fxrate;
-				CostRes->Profit = CostRes->FProfit;
+				if(CostRes->Future == 'F')
+				{
+					CostRes->FProfit = CostRes->nRunDir*CostRes->NomAmount*CostRes->BondFact*
+										(CostRes->Amort - CostData->Amort)*(100 - CostRes->AvPrice)/CostData->Fxrate;
+					CostRes->Profit = CostRes->FProfit;
+				}
+				else
+				{
+					CostRes->FProfit = CostRes->nRunDir*CostRes->NomAmount*CostRes->BondFact*
+										(CostRes->Amort - CostData->Amort)*(100/CostData->Fxrate - CostRes->AvUSDPrice);
+					CostRes->Profit = CostRes->nRunDir*CostRes->NomAmount*CostRes->BondFact*
+										(CostRes->Amort - CostData->Amort)*(100 - CostRes->AvPrice)/CostData->Fxrate;
+				}
 			}
-			else
-			{
-				CostRes->FProfit = CostRes->nRunDir*CostRes->NomAmount*CostRes->BondFact*
-									(CostRes->Amort - CostData->Amort)*
-									(100/CostData->Fxrate - CostRes->AvUSDPrice);
-				CostRes->Profit = CostRes->nRunDir*CostRes->NomAmount*CostRes->BondFact*
-									(CostRes->Amort - CostData->Amort)*
-									(100 - CostRes->AvPrice)/CostData->Fxrate;
-			}
-		}
-		else 
-			if(CostRes->Amort < CostData->Amort)
-			{
-				CostRes->AvPrice = (CostRes->Amort*CostRes->AvPrice + 
-									(CostData->Amort - CostRes->Amort)*100)/CostData->Amort;
-				CostRes->AvUSDPrice = (CostRes->Amort*CostRes->AvUSDPrice + 
-										(CostData->Amort - CostRes->Amort)*
-										100/CostData->Fxrate)/CostData->Amort;
-			}
+			else 
+				if(CostRes->Amort < CostData->Amort)
+				{
+					CostRes->AvPrice = (CostRes->Amort*CostRes->AvPrice + (CostData->Amort - CostRes->Amort)*100)/CostData->Amort;
+					CostRes->AvUSDPrice = (CostRes->Amort*CostRes->AvUSDPrice + 
+											(CostData->Amort - CostRes->Amort)*100/CostData->Fxrate)/CostData->Amort;
+				}
 
-		CostRes->Amort = CostData->Amort;
+			CostRes->Amort = CostData->Amort;
 		
-		if(CostData->NomAmount == 0)
-		{
-			CostAddPL(CostRes);
-			return;
+			if(CostData->NomAmount == 0)
+			{
+				CostAddPL(CostRes);
+				return;
+			}
 		}
 	}
 
 	if(CostData->Dir == 'N') /* take trans_direction as runing dir */
 	{          /* this is used for amortization computation */
 		CostData->Dir = CostRes->RunDir;
-		CostRes->Amort = CostData->Amort;
 		return;
 	}
 
@@ -447,13 +455,25 @@ void CostAvCostMethod(CostType *CostRes, CostDataType *CostData)
 									CostRes->NomAmount*(CostRes->AvPrice - 100)/CostRes->AvFxrate);
 			}
 		}
-
-		CostRes->AvPrice = (CostData->Price*CostData->NomAmount + CostRes->AvPrice*CostRes->NomAmount)/
-							(CostData->NomAmount + CostRes->NomAmount);
-		CostRes->AvUSDPrice = (CostData->USDPrice*CostData->NomAmount + CostRes->AvUSDPrice*CostRes->NomAmount)/
+		else
+			if(CostRes->InfBond)
+			{
+				CostRes->AvPrice = (CostData->Price*CostData->NomAmount*CostData->Amort + CostRes->AvPrice*CostRes->NomAmount*CostRes->Amort)/
+									((CostData->NomAmount + CostRes->NomAmount)*CostData->Amort);
+				CostRes->AvUSDPrice = (CostData->USDPrice*CostData->NomAmount*CostData->Amort + CostRes->AvUSDPrice*CostRes->NomAmount*CostRes->Amort)/
+										((CostData->NomAmount + CostRes->NomAmount)*CostData->Amort);
+				CostRes->Amort = CostData->Amort;
+			}
+			else
+			{
+				CostRes->AvPrice = (CostData->Price*CostData->NomAmount + CostRes->AvPrice*CostRes->NomAmount)/
+									(CostData->NomAmount + CostRes->NomAmount);
+				CostRes->AvUSDPrice = (CostData->USDPrice*CostData->NomAmount + CostRes->AvUSDPrice*CostRes->NomAmount)/
 								(CostData->NomAmount + CostRes->NomAmount);
-		CostRes->NomAmount += CostData->NomAmount;
-		return;
+			}
+
+			CostRes->NomAmount += CostData->NomAmount;
+			return;
 	}
 
 	CostUpdateDir(CostRes, CostRes->RunDir);
@@ -467,6 +487,7 @@ void CostAvCostMethod(CostType *CostRes, CostDataType *CostData)
 			CostRes->RunDir = CostData->Dir;
 			CostRes->AvPrice = CostData->Price;
 			CostRes->AvUSDPrice = CostData->USDPrice;
+			CostRes->Amort = CostData->Amort;
 			if(CostData->TransType == COSTMETHOD_CDS)
 				CostRes->AvFxrate = CostData->Fxrate;
 		}
@@ -510,13 +531,23 @@ void CostUnRealPL2(CostType *CostRes, double Amort)
 		}
 		else
 		{
-			CostRes->UnRealProfit = CostRes->nRunDir*CostRes->NomAmount*Amort*CostRes->BondFact*
-									(CostRes->Market - CostRes->AvPrice)/CostRes->Exrate;
-			if(CostRes->Future == 'F')
-				CostRes->UnRealFProfit = CostRes->UnRealProfit;
+			if(CostRes->InfBond)
+			{
+				CostRes->UnRealProfit = CostRes->nRunDir*CostRes->NomAmount*CostRes->BondFact*
+										(CostRes->Market*Amort - CostRes->AvPrice*CostRes->Amort)/CostRes->Exrate;
+				CostRes->UnRealFProfit = CostRes->nRunDir*CostRes->NomAmount*CostRes->BondFact*
+										(CostRes->Market*Amort/CostRes->Exrate - CostRes->AvUSDPrice*CostRes->Amort);
+			}
 			else
-				CostRes->UnRealFProfit = CostRes->nRunDir*CostRes->NomAmount*Amort*CostRes->BondFact*
-										(CostRes->Market/CostRes->Exrate - CostRes->AvUSDPrice);
+			{
+				CostRes->UnRealProfit = CostRes->nRunDir*CostRes->NomAmount*Amort*CostRes->BondFact*
+										(CostRes->Market - CostRes->AvPrice)/CostRes->Exrate;
+				if(CostRes->Future == 'F')
+					CostRes->UnRealFProfit = CostRes->UnRealProfit;
+				else
+					CostRes->UnRealFProfit = CostRes->nRunDir*CostRes->NomAmount*Amort*CostRes->BondFact*
+												(CostRes->Market/CostRes->Exrate - CostRes->AvUSDPrice);
+			}
 		}
 	}
 	else

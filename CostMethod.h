@@ -10,6 +10,7 @@ typedef struct
 	int nRunDir;
 	int TransType;
 	int bAdd;
+	int InfBond;
 	double NomAmount;
 	double CurrNom;
 	double AvPrice;
@@ -70,10 +71,10 @@ void CostAvCostMethod(CostType *CostRes, CostDataType *CostData);
 double CostComputeAmount(CostType *CostRes, CostDataType *CostData);
 void CostInit(CostType *CostRes, double AmortFact, char Future, int bAdd);
 void CostInit2(CostType *CostRes, double Market, double Exrate, double AmortFact, char Future, int bAdd);
-void CostSetup(CostType *CostRes, CostDataType *CostData, const char *TransType, 
-			const char *AssetType, char Dir, const char *TradeDate, const char *EndDate, int TransNum, 
-			double NomAmount, double Price, double Fxrate, double AmortFact, 
-			int OptTransNum, double OptPrice, double OptFxrate, char OptDir);
+void CostSetup(CostType *CostRes, CostDataType *CostData, const char *TransType, const char *AssetType, 
+			   char Dir, const char *TradeDate, const char *EndDate, int TransNum, double NomAmount, 
+			   double Price, double Fxrate, double AmortFact, int OptTransNum, double OptPrice, 
+			   double OptFxrate, char OptDir);
 void CostSetup2(CostType *CostRes, CostDataType *CostData, const char *TransType, double Factor, 
 				char Dir, const char *TradeDate, const char *EndDate, int TransNum, double NomAmount, 
 				double Price, double Fxrate, double AmortFact, int OptTransNum, double OptPrice, 
