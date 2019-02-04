@@ -20,4 +20,5 @@ int ProcessInputInfo(int argc, char *argv[], char *PortList, int PortSize);
 int ProcessInputInfo1(int argc, char *argv[], char *PortList, int PortSize, char *Date);
 int ProcessInputInfo2(int argc, char *argv[], char *PortList, int PortSize, char *Date, char *Parm1);
 int ProcessInputInfo3(int argc, char *argv[], char *PortList, int PortSize, char *Date, char *Parm1, char *Parm2);
+__int64 FileSize64(const char * szFileName);
 #endif

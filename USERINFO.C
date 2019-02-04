@@ -3,6 +3,8 @@
 #include <string.h>
 #include <time.h>
 #include <assert.h>
+#include <sys\types.h> 
+#include <sys\stat.h> 
 #include "userinfo.h"
 #include <stdlib.h>
 #include "asset.h"
@@ -88,6 +90,9 @@ FILE *OpenInputFile(const char *FName, const char *EnvVar)
 	char FileName[200];
 
 	GetFileName(FileName, sizeof(FileName), EnvVar, FName);
+	if(FileSize64(FileName) == 0)
+		return 0;
+
 	fopen_s(&fp, FileName, "r");
 	if(!fp)
 		printf("Fail to open %s\n", FileName);
@@ -469,3 +474,11 @@ char *fgetline(char *buf, int max, FILE *fp)
 	return (p);
 }
 
+__int64 FileSize64(const char * szFileName) 
+{ 
+  struct __stat64 fileStat; 
+  int err = _stat64(szFileName, &fileStat); 
+  if (0 != err) return 0;
+
+  return fileStat.st_size; 
+}
