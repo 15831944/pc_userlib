@@ -392,6 +392,29 @@ void AssetSetupInterest(AssetType* Asset, const char* FromDate, const char* ToDa
 			Asset->m_IntArr[Asset->m_IntArrCount].m_nAADays = AADays; /* Days in asset periods */
 			Asset->m_IntArr[Asset->m_IntArrCount].m_Rate = Rate;
 			Asset->m_IntArr[Asset->m_IntArrCount].m_AmortFact = AmortFact;
+			Asset->m_IntArr[Asset->m_IntArrCount].m_nInclusive = 0;
+			Asset->m_IntArrCount++;
+		}
+	}
+}
+/*****************************************************/
+/*****************************************************/
+void AssetSetupInterest2(AssetType* Asset, const char* FromDate, const char* ToDate, 
+						double Rate, double AmortFact, int AADays, int Inclusive)
+{
+	if(FromDate && strlen(FromDate) > 0)
+	{
+		SaveCopy(Asset->m_IntArr[Asset->m_IntArrCount].m_FromDate, 
+				sizeof(Asset->m_IntArr[Asset->m_IntArrCount].m_FromDate), FromDate, 0);
+   
+		if(ToDate && strlen(ToDate) > 0)
+		{
+			SaveCopy(Asset->m_IntArr[Asset->m_IntArrCount].m_ToDate, 
+					sizeof(Asset->m_IntArr[Asset->m_IntArrCount].m_ToDate), ToDate, 0);
+			Asset->m_IntArr[Asset->m_IntArrCount].m_nAADays = AADays; /* Days in asset periods */
+			Asset->m_IntArr[Asset->m_IntArrCount].m_Rate = Rate;
+			Asset->m_IntArr[Asset->m_IntArrCount].m_AmortFact = AmortFact;
+			Asset->m_IntArr[Asset->m_IntArrCount].m_nInclusive = Inclusive;
 			Asset->m_IntArrCount++;
 		}
 	}
@@ -547,14 +570,29 @@ double AssetGetPrePaidInterest(AssetType* Asset)
 	
 	for(i = 0; i < Asset->m_IntArrCount; i++)
 	{
-		if(FmsDateCompareDate(&ValueDate, Asset->m_IntArr[i].m_FromDate) >= 0 &&
-			FmsDateCompareDate(&ValueDate, Asset->m_IntArr[i].m_ToDate) < 0)
+		if(Asset->m_IntArr[i].m_nInclusive)
 		{
-			return AssetComputeInterest2(Asset->m_NomAmount, Asset->m_IntArr[i].m_Rate, 
+			if(FmsDateCompareDate(&ValueDate, Asset->m_IntArr[i].m_FromDate) >= 0 &&
+				FmsDateCompareDate(&ValueDate, Asset->m_IntArr[i].m_ToDate) <= 0)
+			{
+				return AssetComputeInterest2(Asset->m_NomAmount, Asset->m_IntArr[i].m_Rate, 
 						Asset->m_IntArr[i].m_FromDate, Asset->m_ValueDate, Asset->m_IntArr[i].m_ToDate, 
 						Asset->m_BondFact, Asset->m_IntArr[i].m_AmortFact, 
 						Asset->m_PlusAmount, Asset->m_RateBasis, 
 						Asset->m_IntArr[i].m_nAADays, &Days)*Factor;
+			}
+		}
+		else
+		{
+			if(FmsDateCompareDate(&ValueDate, Asset->m_IntArr[i].m_FromDate) >= 0 &&
+				FmsDateCompareDate(&ValueDate, Asset->m_IntArr[i].m_ToDate) < 0)
+			{
+				return AssetComputeInterest2(Asset->m_NomAmount, Asset->m_IntArr[i].m_Rate, 
+						Asset->m_IntArr[i].m_FromDate, Asset->m_ValueDate, Asset->m_IntArr[i].m_ToDate, 
+						Asset->m_BondFact, Asset->m_IntArr[i].m_AmortFact, 
+						Asset->m_PlusAmount, Asset->m_RateBasis, 
+						Asset->m_IntArr[i].m_nAADays, &Days)*Factor;
+			}
 		}
 	}
 

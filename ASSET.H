@@ -24,6 +24,7 @@ typedef struct
    double m_AmortFact;
    double m_Rate;
    int    m_nAADays;
+   int  m_nInclusive;
 } InterestType;
 
 typedef struct
@@ -73,6 +74,8 @@ void AssetSetup(AssetType* Asset, double NomAmount, double Price,
 void AssetResetInterest(AssetType* Asset); 
 void AssetSetupInterest(AssetType* Asset, const char* FromDate, const char* ToDate, 
 						double IntRate, double AmortFact, int AADays);
+void AssetSetupInterest2(AssetType* Asset, const char* FromDate, const char* ToDate, 
+						double IntRate, double AmortFact, int AADays, int nInclusive);
 void AssetSetupCapit(AssetType* Asset, const char* CapitStart, const char* CapitEnd, 
 					 double AmortFact, double CapitRate);
 void AssetSetupPlusAmount(AssetType* Asset, double PlusAmount);
