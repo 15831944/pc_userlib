@@ -35,30 +35,30 @@ double CostComputeAmount(CostType *CostRes, CostDataType *CostData)
 *****************************************/
 int CostGetTransType(CostDataType *CostData, const char *TransType)
 {
-	CostData->TransType = 0;
+	CostData->TransType = COSTMETHOD_OPT;
 	if(strstr(TransType, "CASH"))
-		CostData->TransType = 1;
+		CostData->TransType = COSTMETHOD_CASH;
 	else
 		if(strstr(TransType, "LEVERAGE"))
-			CostData->TransType = 2;
+			CostData->TransType = COSTMETHOD_LEVERAGE;
 		else
 			if(strstr(TransType, "REPO"))
-				CostData->TransType = 3;
+				CostData->TransType = COSTMETHOD_REPO;
 			else
 				if(strstr(TransType, "INT. SWAP"))
-					CostData->TransType = 4;
+					CostData->TransType = COSTMETHOD_IRS;
 				else
 					if(strstr(TransType, "FUTU COST"))
-						CostData->TransType = 5;
+						CostData->TransType = COSTMETHOD_FUTU;
 					else
 						if(strstr(TransType, "FX PVALUE"))
-							CostData->TransType = 6;
+							CostData->TransType = COSTMETHOD_FXPVALUE;
 						else
 							if(strstr(TransType, "SECURITIES"))
-								CostData->TransType = 7;
+								CostData->TransType = COSTMETHOD_SECURITIES;
 							else
 								if(strstr(TransType, "CDS"))
-									CostData->TransType = 8;
+									CostData->TransType = COSTMETHOD_CDS;
 
 	return CostData->TransType;
 }
@@ -393,9 +393,9 @@ void CostAvCostMethod(CostType *CostRes, CostDataType *CostData)
 		return;
 	}
 
-	if(!CostRes->InfBond)
+	if(CostRes->Amort != CostData->Amort && CostRes->NomAmount != 0)
 	{
-		if((CostRes->Amort != CostData->Amort) && CostRes->NomAmount != 0)
+		if(!CostRes->InfBond)
 		{
 			if(CostRes->Amort > CostData->Amort)
 			{
@@ -414,20 +414,17 @@ void CostAvCostMethod(CostType *CostRes, CostDataType *CostData)
 				}
 			}
 			else 
-				if(CostRes->Amort < CostData->Amort)
-				{
-					CostRes->AvPrice = (CostRes->Amort*CostRes->AvPrice + (CostData->Amort - CostRes->Amort)*100)/CostData->Amort;
-					CostRes->AvUSDPrice = (CostRes->Amort*CostRes->AvUSDPrice + 
-											(CostData->Amort - CostRes->Amort)*100/CostData->Fxrate)/CostData->Amort;
-				}
+			{
+				CostRes->AvPrice = (CostRes->Amort*CostRes->AvPrice + (CostData->Amort - CostRes->Amort)*100)/CostData->Amort;
+				CostRes->AvUSDPrice = (CostRes->Amort*CostRes->AvUSDPrice + 
+										(CostData->Amort - CostRes->Amort)*100/CostData->Fxrate)/CostData->Amort;
+				CostRes->Profit = 0;
+				CostRes->FProfit = 0;
+			}
 
 			CostRes->Amort = CostData->Amort;
 		
-			if(CostData->NomAmount == 0)
-			{
-				CostAddPL(CostRes);
-				return;
-			}
+			CostAddPL(CostRes);
 		}
 	}
 
@@ -455,25 +452,25 @@ void CostAvCostMethod(CostType *CostRes, CostDataType *CostData)
 									CostRes->NomAmount*(CostRes->AvPrice - 100)/CostRes->AvFxrate);
 			}
 		}
-		else
-			if(CostRes->InfBond)
-			{
-				CostRes->AvPrice = (CostData->Price*CostData->NomAmount*CostData->Amort + CostRes->AvPrice*CostRes->NomAmount*CostRes->Amort)/
+		
+		if(CostRes->InfBond)
+		{
+			CostRes->AvPrice = (CostData->Price*CostData->NomAmount*CostData->Amort + CostRes->AvPrice*CostRes->NomAmount*CostRes->Amort)/
 									((CostData->NomAmount + CostRes->NomAmount)*CostData->Amort);
-				CostRes->AvUSDPrice = (CostData->USDPrice*CostData->NomAmount*CostData->Amort + CostRes->AvUSDPrice*CostRes->NomAmount*CostRes->Amort)/
+			CostRes->AvUSDPrice = (CostData->USDPrice*CostData->NomAmount*CostData->Amort + CostRes->AvUSDPrice*CostRes->NomAmount*CostRes->Amort)/
 										((CostData->NomAmount + CostRes->NomAmount)*CostData->Amort);
-				CostRes->Amort = CostData->Amort;
-			}
-			else
-			{
-				CostRes->AvPrice = (CostData->Price*CostData->NomAmount + CostRes->AvPrice*CostRes->NomAmount)/
-									(CostData->NomAmount + CostRes->NomAmount);
-				CostRes->AvUSDPrice = (CostData->USDPrice*CostData->NomAmount + CostRes->AvUSDPrice*CostRes->NomAmount)/
+			CostRes->Amort = CostData->Amort;
+		}
+		else
+		{
+			CostRes->AvPrice = (CostData->Price*CostData->NomAmount + CostRes->AvPrice*CostRes->NomAmount)/
 								(CostData->NomAmount + CostRes->NomAmount);
-			}
+			CostRes->AvUSDPrice = (CostData->USDPrice*CostData->NomAmount + CostRes->AvUSDPrice*CostRes->NomAmount)/
+								(CostData->NomAmount + CostRes->NomAmount);
+		}
 
-			CostRes->NomAmount += CostData->NomAmount;
-			return;
+		CostRes->NomAmount += CostData->NomAmount;
+		return;
 	}
 
 	CostUpdateDir(CostRes, CostRes->RunDir);
