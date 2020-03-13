@@ -826,6 +826,7 @@ void CostFIFOAvCostMethod(CostType *CostRes, CostDataType *CostData)
 {
 	int i;
 	int bInit = 0;
+	int bprocessed = 0;
 	CostNodeType *pItem;
 	CostDataType NewCostData;
 	CostType NewCostRes;
@@ -852,14 +853,18 @@ void CostFIFOAvCostMethod(CostType *CostRes, CostDataType *CostData)
 			NewCostData.USDPrice = pItem->USDPrice;
 			NewCostData.Amort = pItem->Amort;
 			CostAvCostMethod(&NewCostRes, &NewCostData);
+			bprocessed = 1;
 		}
 	}
 	
-	CostRes->RunDir = NewCostRes.RunDir;
-	CostRes->AvPrice = NewCostRes.AvPrice;
-	CostRes->AvUSDPrice = NewCostRes.AvUSDPrice;
-	CostRes->NomAmount = NewCostRes.NomAmount;
-	CostUpdateDir(CostRes, CostRes->RunDir);
+	if(bprocessed > 0)
+	{
+		CostRes->RunDir = NewCostRes.RunDir;
+		CostRes->AvPrice = NewCostRes.AvPrice;
+		CostRes->AvUSDPrice = NewCostRes.AvUSDPrice;
+		CostRes->NomAmount = NewCostRes.NomAmount;
+		CostUpdateDir(CostRes, CostRes->RunDir);
+	}
 }
 /*****************************************
 *****************************************/
