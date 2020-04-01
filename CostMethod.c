@@ -814,8 +814,8 @@ int CostFIFOMethod(CostType *CostRes, CostDataType *CostData)
 	CostUpdateDir(CostRes, CostRes->LastDir);
 	
 	if(CostRes->LastDir != CostData->Dir && 
-		(CostRes->LastDir == 'S' || CostRes->LastDir == 'P') && 
-		(CostData->Dir == 'P' || CostData->Dir == 'S'))
+		((CostRes->LastDir == 'S' || CostRes->LastDir == 'P') || 
+		(CostData->Dir == 'P' || CostData->Dir == 'S')))
 		return CostFIFOMethodDetail(CostRes, CostData);
 
 	return 0;
@@ -923,8 +923,8 @@ int CostFIFOMethodNav(CostType *CostRes, CostDataType *CostData, const char *Pre
 	CostUpdateDir(CostRes, CostRes->LastDir);
 	
 	if(CostRes->LastDir != CostData->Dir && 
-		(CostRes->LastDir == 'S' || CostRes->LastDir == 'P') && 
-		(CostData->Dir == 'P' || CostData->Dir == 'S'))
+		((CostRes->LastDir == 'S' || CostRes->LastDir == 'P') || 
+		(CostData->Dir == 'P' || CostData->Dir == 'S')))
 		return CostFIFOMethodNavDetail(CostRes, CostData, PrevDate, PrevAmort, PrevPrice, PrevFxrate);
 
 	return 0;
@@ -1035,6 +1035,7 @@ void CostFIFOAvCostNavMethod(CostType *CostRes, CostDataType *CostData, const ch
 {
 	int i;
 	int bInit = 0, bPrev;
+	int bprocessed = 0;
 	CostNodeType *pItem;
 	CostDataType NewCostData;
 	CostType NewCostRes;
@@ -1074,13 +1075,17 @@ void CostFIFOAvCostNavMethod(CostType *CostRes, CostDataType *CostData, const ch
 			}
 			
 			CostAvCostMethod(&NewCostRes, &NewCostData);
+			bprocessed = 1;
 		}
 	}
 	
-	CostRes->RunDir = NewCostRes.RunDir;
-	CostRes->AvPrice = NewCostRes.AvPrice;
-	CostRes->AvUSDPrice = NewCostRes.AvUSDPrice;
-	CostRes->NomAmount = NewCostRes.NomAmount;
+	if(bprocessed)
+	{
+		CostRes->RunDir = NewCostRes.RunDir;
+		CostRes->AvPrice = NewCostRes.AvPrice;
+		CostRes->AvUSDPrice = NewCostRes.AvUSDPrice;
+		CostRes->NomAmount = NewCostRes.NomAmount;
+	}
 }
 /*****************************************
 *****************************************/
